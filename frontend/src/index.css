@@ -1,0 +1,178 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background-color: #080d1a;
+    color: #f1f5f9;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0f1629;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #475569;
+  }
+}
+
+@layer components {
+  /* ── Card ── */
+  .card {
+    @apply bg-slate-900 border border-slate-800 rounded-2xl p-6;
+  }
+
+  .card-glass {
+    background: rgba(15, 22, 41, 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    @apply border border-slate-700/50 rounded-2xl p-6;
+  }
+
+  /* ── Buttons ── */
+  .btn {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all duration-200 cursor-pointer select-none disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply btn bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/30 active:scale-95;
+  }
+
+  .btn-secondary {
+    @apply btn bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700;
+  }
+
+  .btn-danger {
+    @apply btn bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-600/30;
+  }
+
+  .btn-success {
+    @apply btn bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-600/30;
+  }
+
+  .btn-icon {
+    @apply btn p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200;
+  }
+
+  /* ── Inputs ── */
+  .input {
+    @apply w-full bg-slate-800/60 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-slate-200 placeholder-slate-500
+           focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 transition-all duration-200;
+  }
+
+  .label {
+    @apply block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5;
+  }
+
+  /* ── Badge ── */
+  .badge {
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold;
+  }
+
+  .badge-success { @apply badge bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/30; }
+  .badge-error   { @apply badge bg-rose-500/15 text-rose-400 ring-1 ring-rose-500/30; }
+  .badge-warning { @apply badge bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/30; }
+  .badge-info    { @apply badge bg-indigo-500/15 text-indigo-400 ring-1 ring-indigo-500/30; }
+  .badge-gray    { @apply badge bg-slate-700/60 text-slate-400; }
+
+  /* ── Table ── */
+  .table-wrapper {
+    @apply w-full overflow-x-auto rounded-xl border border-slate-800;
+  }
+
+  .table {
+    @apply w-full text-sm;
+  }
+
+  .table thead {
+    @apply bg-slate-800/60;
+  }
+
+  .table th {
+    @apply text-left text-xs font-semibold text-slate-400 uppercase tracking-wider px-4 py-3;
+  }
+
+  .table tbody tr {
+    @apply border-t border-slate-800 hover:bg-slate-800/30 transition-colors;
+  }
+
+  .table td {
+    @apply px-4 py-3 text-slate-300;
+  }
+
+  /* ── Stat Card ── */
+  .stat-card {
+    @apply card relative overflow-hidden;
+  }
+
+  /* ── Section Header ── */
+  .section-title {
+    @apply text-xl font-bold text-slate-100;
+  }
+
+  .section-subtitle {
+    @apply text-sm text-slate-500 mt-0.5;
+  }
+
+  /* ── Select ── */
+  .select {
+    @apply input appearance-none cursor-pointer;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    background: linear-gradient(135deg, #818cf8 0%, #a78bfa 50%, #c084fc 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .glow-indigo {
+    box-shadow: 0 0 30px rgba(99, 102, 241, 0.15);
+  }
+
+  .glow-emerald {
+    box-shadow: 0 0 30px rgba(16, 185, 129, 0.15);
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.35s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+}
