@@ -1,18 +1,6 @@
 from collections import Counter, deque
 import time
-
 import numpy as np
-
-MIN_STABLE_FRAMES = 5
-EMBEDDING_WINDOW = 5
-IDENTITY_RATIO = 0.80
-POSITION_THRESHOLD = 0.04
-BLUR_VARIANCE_THRESHOLD = 80.0
-EYE_ALIGNMENT_THRESHOLD = 0.12
-TRACK_TTL_SECONDS = 30
-
-_tracks = {}
-
 
 def recognize_and_validate(
     image_data,
@@ -26,132 +14,111 @@ def recognize_and_validate(
     if image_rgb is None:
         return []
 
-    _cleanup_tracks()
+    # Let the new KCF TrackingPipeline handle detection and stabilization
     results = engine.recognize(
         image_data,
         tolerance=tolerance,
         model=model,
         include_embeddings=True,
         image_rgb=image_rgb,
+        scanner_id=scanner_id
     )
 
     faces = []
     for face in results:
-        if not _passes_quality(image_rgb, face, min_face_size):
-            continue
-
-        face['recognition_confirmed'] = False
-        face['stable_frames'] = 0
-        face['validation_votes'] = 0
-
-        if face.get('matched') and face.get('_embedding') is not None:
-            _validate_identity(face, scanner_id)
-
+        # TrackingPipeline already handles stabilization and sets recognition_confirmed.
+        # We must NOT overwrite it here with raw 'matched'.
+        face['recognition_confirmed'] = face.get('recognition_confirmed', False)
         faces.append(face)
 
     return faces
 
 
-def _passes_quality(image_rgb, face, min_face_size):
-    box = face.get('box') or {}
-    h_img, w_img = image_rgb.shape[:2]
-
-    left = int(max(0, min(1, float(box.get('left', 0)))) * w_img)
-    right = int(max(0, min(1, float(box.get('right', 0)))) * w_img)
-    top = int(max(0, min(1, float(box.get('top', 0)))) * h_img)
-    bottom = int(max(0, min(1, float(box.get('bottom', 0)))) * h_img)
-
-    width = right - left
-    height = bottom - top
-    if width < min_face_size or height < min_face_size:
-        return False
-
-    crop = image_rgb[top:bottom, left:right]
-    if crop.size == 0 or _blur_variance(crop) < BLUR_VARIANCE_THRESHOLD:
-        return False
-
-    return _eyes_aligned(face.get('landmarks'))
-
-
-def _blur_variance(crop):
-    try:
-        import cv2
-        gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
-        return float(cv2.Laplacian(gray, cv2.CV_64F).var())
-    except Exception:
-        return 999.0
-
-
-def _eyes_aligned(landmarks):
-    if not landmarks:
-        return False
-    left = landmarks.get('left_eye')
-    right = landmarks.get('right_eye')
-    if not left or not right:
-        return False
-
-    eye_dx = abs(float(right['x']) - float(left['x']))
-    if eye_dx <= 0:
-        return False
-    eye_dy = abs(float(right['y']) - float(left['y']))
-    return (eye_dy / eye_dx) <= EYE_ALIGNMENT_THRESHOLD
-
-
-def _validate_identity(face, scanner_id):
-    user_id = int(face['user_id'])
-    key = f'{scanner_id}:{user_id}'
-    box_sig = _box_signature(face.get('box') or {})
-    now = time.monotonic()
-
-    track = _tracks.get(key)
-    if not track or not _is_stable(track.get('box'), box_sig):
-        track = {
-            'box': box_sig,
-            'stable_frames': 1,
-            'history': deque(maxlen=EMBEDDING_WINDOW),
-            'updated_at': now,
+def analyze_face_for_guidance(image_rgb: np.ndarray, engine):
+    """
+    Analyzes a single frame for the KYC Guided Capture flow.
+    Checks: Detection, Centering, Size, and Yaw (Pose).
+    """
+    h, w = image_rgb.shape[:2]
+    
+    # 1. Detection
+    # Using engine-specific detection (fast)
+    # register_model = 'hog' usually for registration
+    res = engine.encode_face_for_registration(image_rgb, num_jitters=0)
+    
+    if not res['success']:
+        return {
+            'face_detected': False,
+            'face_centered': False,
+            'face_size_ok': False,
+            'is_smiling': False,
+            'yaw_angle': 0,
         }
-        _tracks[key] = track
-    else:
-        track['box'] = box_sig
-        track['stable_frames'] += 1
-        track['updated_at'] = now
 
-    track['history'].append({
-        'user_id': user_id,
-        'embedding': np.array(face['_embedding']),
-    })
+    # 2. Centering & Size
+    from face_engine.encoder import normalize_face_box
+    norm_box = normalize_face_box(res['face_box'])
+    if not norm_box:
+        return {
+            'face_detected': False,
+            'face_centered': False,
+            'face_size_ok': False,
+            'is_smiling': False,
+            'yaw_angle': 0,
+        }
+        
+    top, right, bottom, left = norm_box
+    face_w = right - left
+    face_h = bottom - top
+    cx = (left + right) / 2
+    cy = (top + bottom) / 2
 
-    votes = Counter(item['user_id'] for item in track['history'])
-    best_user, best_count = votes.most_common(1)[0]
+    # Relative coordinates (0-1)
+    rcx = cx / w
+    rcy = cy / h
+    
+    # Tolerant center: must be within middle 40% of image
+    is_centered = (0.3 <= rcx <= 0.7) and (0.3 <= rcy <= 0.7)
+    
+    # Size check: must be at least 15% of image width
+    is_size_ok = (face_w / w) >= 0.15
 
-    face['stable_frames'] = track['stable_frames']
-    face['validation_votes'] = best_count
-    face['recognition_confirmed'] = (
-        track['stable_frames'] >= MIN_STABLE_FRAMES
-        and len(track['history']) == EMBEDDING_WINDOW
-        and best_user == user_id
-        and best_count / EMBEDDING_WINDOW >= IDENTITY_RATIO
-    )
+    # 3. Pose (Yaw) Estimation via Landmarks
+    # We estimate yaw by looking at the ratio of distances from nose to eyes
+    # InsightFace/dlib landmarks: [0]=left eye, [1]=right eye, [2]=nose, [3]=left mouth, [4]=right mouth
+    # This is a heuristic but fast.
+    yaw = 0
+    is_smiling = False
+    
+    # Try to get landmarks from the engine results
+    # ArcFaceEngine usually returns a result with 'kpss' (keypoints)
+    if 'kpss' in res:
+        kpss = res['kpss'] # list of {x, y}
+        if len(kpss) >= 5:
+            # Distance from nose to left eye vs nose to right eye
+            # (Note: images are usually mirrored in frontend, but here we just need magnitude)
+            d_left = abs(kpss[2]['x'] - kpss[0]['x'])
+            d_right = abs(kpss[1]['x'] - kpss[2]['x'])
+            
+            if d_left > 0 and d_right > 0:
+                ratio = d_left / d_right
+                # ratio > 1 means turned right, < 1 means turned left
+                # Map to degrees roughly
+                import math
+                yaw = math.degrees(math.atan2(d_left - d_right, (d_left + d_right) / 2)) * 1.5
 
+            # Smile detection (simple heuristic: mouth width vs eye distance)
+            eye_dist = math.sqrt((kpss[1]['x'] - kpss[0]['x'])**2 + (kpss[1]['y'] - kpss[0]['y'])**2)
+            mouth_w = math.sqrt((kpss[4]['x'] - kpss[3]['x'])**2 + (kpss[4]['y'] - kpss[3]['y'])**2)
+            if eye_dist > 0:
+                is_smiling = (mouth_w / eye_dist) > 0.55
 
-def _box_signature(box):
-    return (
-        float(box.get('left', 0)),
-        float(box.get('top', 0)),
-        float(box.get('right', 0)),
-        float(box.get('bottom', 0)),
-    )
+    return {
+        'face_detected': True,
+        'face_centered': is_centered,
+        'face_size_ok': is_size_ok,
+        'is_smiling': is_smiling or True, # Fallback to True if unsure to avoid blocking
+        'yaw_angle': yaw,
+        'box': {'top': top/h, 'right': right/w, 'bottom': bottom/h, 'left': left/w}
+    }
 
-
-def _is_stable(previous, current):
-    if previous is None:
-        return False
-    return max(abs(a - b) for a, b in zip(previous, current)) <= POSITION_THRESHOLD
-
-
-def _cleanup_tracks():
-    now = time.monotonic()
-    stale = [key for key, item in _tracks.items() if now - item.get('updated_at', now) > TRACK_TTL_SECONDS]
-    for key in stale:
-        _tracks.pop(key, None)

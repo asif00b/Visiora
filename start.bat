@@ -1,78 +1,74 @@
 @echo off
 setlocal enabledelayedexpansion
 
-title Face Recognition Attendance System — Running
+title Face Recognition Attendance System - Running
 color 0B
+
+if "%DATABASE_URL%"=="" set "DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/attendance_db"
+if "%INSIGHTFACE_MODEL%"=="" set "INSIGHTFACE_MODEL=buffalo_s"
+if "%INSIGHTFACE_DET_SIZE%"=="" set "INSIGHTFACE_DET_SIZE=320"
+if "%TRACKER_ALGORITHM%"=="" set "TRACKER_ALGORITHM=KCF"
 
 echo.
 echo ============================================================
 echo   Face Recognition Attendance System
-echo   Version 6 ^| XAMPP MySQL
+echo   PostgreSQL + pgvector + InsightFace
 echo ============================================================
 echo.
 
-REM ── Check MySQL is reachable ─────────────────────────────────
-echo Checking XAMPP MySQL...
-python -c "import pymysql; c=pymysql.connect(host='localhost',port=3306,user='root',password='',connect_timeout=3); c.close()" >nul 2>&1
-if errorlevel 1 (
-    echo.
-    echo [ERROR] Cannot reach MySQL at localhost:3306
-    echo         Please start MySQL in XAMPP Control Panel first!
-    echo.
-    pause
-    exit /b 1
-)
-echo [OK] MySQL is running.
-echo.
-
-REM ── Activate virtual environment ─────────────────────────────
 cd /d "%~dp0backend"
 
 if not exist venv\Scripts\activate.bat (
-    echo [ERROR] Virtual environment not found.
-    echo         Please run setup.bat first!
+    echo [ERROR] Virtual environment not found. Run setup.bat first.
     pause
     exit /b 1
 )
 
 call venv\Scripts\activate.bat
 
-REM ── Start Flask backend in a new window ─────────────────────
+echo Checking PostgreSQL...
+python -c "import os; from sqlalchemy import create_engine,text; e=create_engine(os.environ['DATABASE_URL']); c=e.connect(); c.execute(text('SELECT 1')); c.close(); print('[OK] PostgreSQL reachable')"
+if errorlevel 1 (
+    echo.
+    echo [ERROR] Cannot connect to PostgreSQL with DATABASE_URL:
+    echo         %DATABASE_URL%
+    echo.
+    pause
+    exit /b 1
+)
+echo.
+
 echo Starting Flask backend...
 start "Flask Backend :5000" cmd /k "cd /d %~dp0backend && call venv\Scripts\activate.bat && python app.py"
 
-REM Wait 3 seconds for Flask to initialize
-timeout /t 3 /nobreak >nul
+timeout /t 4 /nobreak >nul
 
-REM ── Start Vite frontend ──────────────────────────────────────
 echo Starting React frontend...
 cd /d "%~dp0frontend"
 
 if not exist node_modules (
-    echo [INFO] Installing frontend dependencies (first time)...
+    echo [INFO] Installing frontend dependencies...
     npm install
 )
 
 start "React Frontend :5173" cmd /k "cd /d %~dp0frontend && npm run dev"
 
-REM Wait for Vite to start
 timeout /t 4 /nobreak >nul
 
 echo.
 echo ============================================================
 echo   System is starting up...
 echo.
-echo   Backend API:   http://localhost:5000/api/health
-echo   Frontend:      http://localhost:5173
+echo   Backend API: http://localhost:5000/api/health
+echo   Frontend:    http://localhost:5173
 echo.
-echo   Admin login:   admin@system.com
-echo   Password:      admin123
+echo   Admin login: admin@system.com
+echo   Password:    admin123
 echo.
 echo   Close the two terminal windows to stop the system.
 echo ============================================================
 echo.
 
-REM Open browser automatically
 start http://localhost:5173
 
 pause

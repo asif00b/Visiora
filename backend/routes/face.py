@@ -22,6 +22,24 @@ from face_engine.engine_factory import (
 face_bp = Blueprint('face', __name__)
 logger  = logging.getLogger(__name__)
 
+# In-memory per-day deduplication cache. PostgreSQL and attendance_service still
+# enforce correctness, this just avoids repeated DB writes during live scanning.
+_session_marked_cache = set()
+_session_marked_day = None
+
+
+def _attendance_cache_key(user_id, session_id):
+    global _session_marked_day
+    today = datetime.utcnow().date()
+    if _session_marked_day != today:
+        _session_marked_cache.clear()
+        _session_marked_day = today
+    if session_id is not None and str(session_id).strip() not in ('', '0', 'null', 'None'):
+        session_id = int(session_id)
+    else:
+        session_id = None
+    return int(user_id), session_id, today
+
 
 # ── Registration ──────────────────────────────────────────────────────────────
 
@@ -45,7 +63,7 @@ def register_face():
       4. Update user profile picture with the best image.
     """
     data    = request.get_json() or {}
-    user_id = data.get('user_id')
+    user_id = int(data.get('user_id')) if data.get('user_id') is not None else None
     images  = data.get('images', [])
 
     if not user_id or not images:
@@ -484,12 +502,14 @@ def setup_arcface():
         if not ARCFACE_AVAILABLE:
             return jsonify({
                 'success': False,
-                'message': 'InsightFace package not installed. Run: pip install insightface onnxruntime',
+                'message': 'InsightFace package not installed. Run: pip install insightface onnxruntime-gpu',
             }), 503
 
         from insightface.app import FaceAnalysis
-        app = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider'])
-        app.prepare(ctx_id=-1, det_size=(640, 640))
+        model_name = current_app.config.get('INSIGHTFACE_MODEL', 'buffalo_s')
+        det_size = current_app.config.get('INSIGHTFACE_DET_SIZE', 320)
+        app = FaceAnalysis(name=model_name, providers=['CPUExecutionProvider'])
+        app.prepare(ctx_id=-1, det_size=(det_size, det_size))
 
         from face_engine.arcface_engine import ArcFaceEngine
         ArcFaceEngine._instance = None
@@ -497,7 +517,7 @@ def setup_arcface():
 
         return jsonify({
             'success': True,
-            'message': 'ArcFace buffalo_l model loaded successfully. Switch backend to arcface to activate.',
+            'message': f'ArcFace {model_name} model loaded successfully. Switch backend to arcface to activate.',
         }), 200
     except Exception as e:
         logger.error(f'[ArcFace Setup] {e}')
@@ -534,7 +554,7 @@ def recognize_face():
     if not engine.available:
         return jsonify({
             'success': False,
-            'message': 'face_recognition not installed. Run setup.bat.',
+            'message': 'Face engine not available. Run setup.bat and verify InsightFace/ONNX Runtime installation.',
             'faces':   [],
         }), 503
 
@@ -576,26 +596,37 @@ def recognize_face():
         face_encoding = face_out.pop('_embedding', None)
 
         if face['matched'] and face.get('recognition_confirmed') and should_mark:
-            try:
-                mark_result = mark_attendance_once(face['user_id'], session_id)
-                face_out['attendance_marked'] = mark_result['marked']
-                face_out['attendance_status'] = mark_result['reason']
-                logger.info(
-                    f'[Attendance] user_id={face["user_id"]} '
-                    f'distance={round(face["distance"], 4)} '
-                    f'confidence={confidence}% '
-                    f'marked={mark_result["marked"]}'
-                )
-            except Exception as mark_err:
-                logger.error(f'[Attendance] mark failed for user_id={face["user_id"]}: {mark_err}')
+            cache_key = _attendance_cache_key(face['user_id'], session_id)
+            if cache_key in _session_marked_cache:
                 face_out['attendance_marked'] = False
-
-        elif not face['matched'] and save_unknown:
-            _save_unknown_face(image_data, engine, face.get('distance', 1.0), face_encoding)
+                face_out['attendance_status'] = 'already_marked_today'
+            else:
+                try:
+                    mark_result = mark_attendance_once(face['user_id'], session_id)
+                    face_out['attendance_marked'] = mark_result['marked']
+                    face_out['attendance_status'] = mark_result['reason']
+                    if mark_result['marked'] or mark_result['reason'] in ('already_marked_today', 'cooldown'):
+                        _session_marked_cache.add(cache_key)
+                        
+                    logger.info(
+                        f'[Attendance] user_id={face["user_id"]} '
+                        f'distance={round(face["distance"], 4)} '
+                        f'confidence={confidence}% '
+                        f'marked={mark_result["marked"]}'
+                    )
+                except Exception as mark_err:
+                    logger.error(f'[Attendance] mark failed for user_id={face["user_id"]}: {mark_err}')
+                    face_out['attendance_marked'] = False
+        elif not face['matched'] and face_encoding is not None and save_unknown:
+            _save_unknown_face(image_data, engine, face['distance'], face_encoding)
 
         output.append(face_out)
 
     return jsonify({'success': True, 'faces': output, 'total': len(output)}), 200
+
+
+
+
 
 
 # ── Verify endpoint (single-user identity check) ──────────────────────────────
@@ -749,110 +780,81 @@ _recent_unknown_encodings: list = []
 
 def _save_unknown_face(image_data: str, engine, distance: float, face_encoding=None):
     """
-    Save unknown face snapshot with deduplication.
-    BUG FIX #2: Uses engine.get_unknown_encoding() instead of importing
-    face_recognition directly, so it works with ArcFace too.
+    Deduplicates and durably saves a new unknown face.
+    Avoids saving duplicate pictures of the same unknown person.
     """
+    if face_encoding is None:
+        return None
+
+    import uuid
+    # Convert face_encoding to a numpy array for calculation
+    probe = np.array(face_encoding, dtype=np.float32)
+
+    # 1. Check the in-memory LRU cache first (very fast)
     global _recent_unknown_encodings
+    tolerance = float(
+        SystemConfig.get('arcface_tolerance', '0.40')
+        if getattr(engine, 'backend', 'dlib') == 'arcface'
+        else SystemConfig.get('recognition_tolerance', '0.50')
+    )
+    # Deduplication threshold uses the active engine tolerance
+    dedup_threshold = tolerance
+
+    if _recent_unknown_encodings:
+        dists = engine.compare_encodings(_recent_unknown_encodings, probe)
+        if len(dists) > 0 and float(np.min(dists)) <= dedup_threshold:
+            # Already captured in recent frames — skip
+            return None
+
+    # 2. Check the database to make it durable across server restarts (last 100 entries)
     try:
-        unk_dir = current_app.config['UNKNOWN_FACES_DIR']
-        os.makedirs(unk_dir, exist_ok=True)
+        recent_db_records = UnknownFace.query.order_by(UnknownFace.captured_at.desc()).limit(100).all()
+        db_encodings = []
+        for rec in recent_db_records:
+            enc = rec.get_encoding()
+            if enc is not None:
+                db_encodings.append(np.array(enc, dtype=np.float32))
 
-        dedup_threshold = float(SystemConfig.get('unknown_face_dedup_threshold', '0.6'))
-        max_total       = int(SystemConfig.get('unknown_face_max_total', '100'))
-        max_age_days    = int(SystemConfig.get('unknown_face_max_age_days', '7'))
+        if db_encodings:
+            dists = engine.compare_encodings(db_encodings, probe)
+            if len(dists) > 0 and float(np.min(dists)) <= dedup_threshold:
+                # Already captured in database — skip, but add to in-memory cache to speed up subsequent frames
+                _recent_unknown_encodings.append(probe)
+                if len(_recent_unknown_encodings) > _DEDUP_WINDOW:
+                    _recent_unknown_encodings.pop(0)
+                return None
+    except Exception as exc:
+        logger.warning(f"[UnknownFace] Database dedup check skipped: {exc}")
 
-        # ── Get face encoding via active engine (NOT raw face_recognition) ────
-        face_enc = np.array(face_encoding) if face_encoding is not None else None
-        try:
-            if face_enc is not None:
-                pass
-            elif hasattr(engine, 'get_unknown_encoding'):
-                # ArcFace engine has this method
-                face_enc_list = engine.get_unknown_encoding(image_data)
-                if face_enc_list is not None:
-                    face_enc = np.array(face_enc_list)
-            else:
-                # dlib engine: decode image then encode
-                image_rgb = engine.decode_image(image_data)
-                if image_rgb is not None:
-                    result = engine.encode_face_for_registration(image_rgb, num_jitters=1)
-                    if result.get('success') and result.get('encoding') is not None:
-                        face_enc = np.array(result['encoding'])
-        except Exception as enc_err:
-            logger.debug(f'[UnknownSave] Encoding for dedup failed: {enc_err}')
+    # 3. New unique unknown face! Decode, save to disk, and record in DB
+    filename = f"{uuid.uuid4()}.jpg"
+    filepath = os.path.join(current_app.config['UNKNOWN_FACES_DIR'], filename)
 
-        # ── Dedup check ───────────────────────────────────────────────────────
-        if face_enc is not None and _recent_unknown_encodings:
-            dists = _engine_compare(_recent_unknown_encodings, face_enc)
-            if len(dists) > 0 and float(np.min(dists)) < dedup_threshold:
-                logger.debug('[UnknownSave] Skipping duplicate unknown face.')
-                return
+    try:
+        # Decode base64 image data
+        if image_data.startswith('data:'):
+            image_data = image_data.split(',', 1)[1]
+        img_bytes = base64.b64decode(image_data)
+        with open(filepath, 'wb') as f:
+            f.write(img_bytes)
 
-        # ── Global cap ────────────────────────────────────────────────────────
-        total_count = UnknownFace.query.count()
-        if total_count >= max_total:
-            logger.debug(f'[UnknownSave] Cap reached ({total_count}/{max_total}) — skipping.')
-            return
-
-        # ── Auto-cleanup stale records ────────────────────────────────────────
-        from datetime import timedelta
-        cutoff = datetime.utcnow() - timedelta(days=max_age_days)
-        stale  = UnknownFace.query.filter(UnknownFace.captured_at < cutoff).all()
-        for rec in stale:
-            try:
-                fname = os.path.basename(rec.image_path)
-                fpath = os.path.join(unk_dir, fname)
-                if os.path.exists(fpath):
-                    os.remove(fpath)
-            except Exception:
-                pass
-            db.session.delete(rec)
-        if stale:
-            db.session.flush()
-
-        # ── Save image ────────────────────────────────────────────────────────
-        raw_data   = image_data.split(',', 1)[1] if ',' in image_data else image_data
-        img_bytes  = base64.b64decode(raw_data)
-
-        filename   = f'unk_{datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")}.jpg'
-        filepath   = os.path.join(unk_dir, filename)
-
-        try:
-            import cv2
-            nparr   = np.frombuffer(img_bytes, np.uint8)
-            img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            if img_bgr is not None:
-                cv2.imwrite(filepath, img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
-            else:
-                with open(filepath, 'wb') as f:
-                    f.write(img_bytes)
-        except Exception:
-            with open(filepath, 'wb') as f:
-                f.write(img_bytes)
-
-        # ── DB record ─────────────────────────────────────────────────────────
-        unk = UnknownFace(
-            image_path       = filename,
-            confidence_score = distance,
+        db_path = f"unknown_faces/{filename}"
+        new_unknown = UnknownFace(
+            image_path=db_path,
+            confidence_score=distance,
         )
-        if face_enc is not None:
-            unk.set_encoding(face_enc)
-
-        db.session.add(unk)
+        new_unknown.set_encoding(probe)
+        db.session.add(new_unknown)
         db.session.commit()
 
-        # Keep recent encodings in memory for fast dedup
-        if face_enc is not None:
-            _recent_unknown_encodings.append(face_enc)
-            if len(_recent_unknown_encodings) > _DEDUP_WINDOW:
-                _recent_unknown_encodings = _recent_unknown_encodings[-_DEDUP_WINDOW:]
+        # Add to in-memory cache
+        _recent_unknown_encodings.append(probe)
+        if len(_recent_unknown_encodings) > _DEDUP_WINDOW:
+            _recent_unknown_encodings.pop(0)
 
-        logger.info(f'[UnknownSave] Saved: {filename}')
-
+        logger.info(f"[UnknownFace] Saved new unknown face to {db_path} with distance={distance}")
+        return new_unknown
     except Exception as e:
-        logger.error(f'[UnknownSave] Error: {e}')
-        try:
-            db.session.rollback()
-        except Exception:
-            pass
+        db.session.rollback()
+        logger.error(f"[UnknownFace] Failed to save unknown face: {e}")
+        return None

@@ -38,10 +38,11 @@ def update_config():
         for key, value in data.items():
             SystemConfig.set(key, value)
 
-        # Reload face engine tolerance from new config
+        # Reload active face engine after recognition-related config changes.
         try:
-            from face_engine.encoder import FaceEngine
-            FaceEngine.get_instance().load_from_db()
+            from face_engine.engine_factory import reset_engine, get_engine
+            reset_engine()
+            get_engine().load_from_db()
         except Exception:
             pass
 
@@ -223,8 +224,8 @@ def cleanup_unknown_faces():
 
         # 2. Dedup — remove records whose encoding is too close to an earlier one
         try:
-            from face_engine.encoder import FaceEngine
-            engine       = FaceEngine.get_instance()
+            from face_engine.engine_factory import get_engine
+            engine       = get_engine()
             all_recs     = UnknownFace.query.order_by(UnknownFace.captured_at.asc()).all()
             seen_encs    = []
             to_delete    = []
@@ -424,8 +425,8 @@ def storage_info():
 def reload_face_cache():
     """Force reload of in-memory face encoding cache from DB."""
     try:
-        from face_engine.encoder import FaceEngine
-        engine = FaceEngine.get_instance()
+        from face_engine.engine_factory import get_engine
+        engine = get_engine()
         engine.load_from_db()
         return jsonify({
             'success': True,
@@ -456,16 +457,15 @@ def database_health():
 @require_role('admin')
 def system_info():
     try:
-        from face_engine.encoder import (
-            FaceEngine, FACE_RECOGNITION_AVAILABLE,
-            CV2_AVAILABLE, GPU_AVAILABLE, BEST_MODEL
-        )
-        engine             = FaceEngine.get_instance()
+        from face_engine.engine_factory import get_engine, engine_info
+        from face_engine.encoder import CV2_AVAILABLE
+        engine             = get_engine()
+        info               = engine_info()
         cache_size         = engine.cache_size()
-        face_available     = FACE_RECOGNITION_AVAILABLE
+        face_available     = engine.available
         cv2_available      = CV2_AVAILABLE
-        gpu_available      = GPU_AVAILABLE
-        recommended_model  = BEST_MODEL
+        gpu_available      = engine.gpu_available
+        recommended_model  = engine.recommended_model
     except Exception:
         cache_size         = 0
         face_available     = False
@@ -484,6 +484,8 @@ def system_info():
             'opencv_available':           cv2_available,
             'gpu_available':              gpu_available,
             'recommended_model':          recommended_model,
+            'face_engine_backend':        info.get('backend'),
+            'embedding_dim':              info.get('embedding_dim'),
             'cache_size':                 cache_size,
             'total_users':                User.query.count(),
             'total_encodings':            FaceEncoding.query.count(),

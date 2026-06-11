@@ -5,7 +5,6 @@ from datetime import datetime
 class UnknownFace(db.Model):
     __tablename__ = 'unknown_faces'
     __table_args__ = (
-        db.Index('ix_unknown_faces_captured_at', 'captured_at'),
         db.Index('ix_unknown_faces_cluster_id', 'cluster_id'),
     )
 
@@ -15,7 +14,7 @@ class UnknownFace(db.Model):
     confidence_score = db.Column(db.Float, nullable=True)       # Distance from nearest match
     assigned_to_id   = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     # Deduplication support — stores the 128-d face encoding as JSON text
-    encoding_data    = db.Column(db.Text(length=65535), nullable=True)
+    encoding_data    = db.Column(db.Text, nullable=True)
     # Groups visually similar unknown faces (e.g. same person at different times)
     cluster_id       = db.Column(db.String(64), nullable=True)
 

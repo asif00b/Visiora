@@ -14,7 +14,9 @@ import AttendanceReport from './pages/Attendance/AttendanceReport'
 import Scanner from './pages/Scanner'
 import AdminConfig from './pages/Admin/Config'
 import UnknownFaces from './pages/Admin/UnknownFaces'
-import TrainModel from './pages/TrainModel'
+// Training module hidden for now — kept on disk for future use
+// import Training from './pages/Admin/Training'
+// import TrainModel from './pages/TrainModel'
 
 export default function App() {
   return (
@@ -45,7 +47,7 @@ export default function App() {
                 <Route path="/departments" element={<Departments />} />
                 <Route path="/admin/config" element={<AdminConfig />} />
                 <Route path="/admin/unknown-faces" element={<UnknownFaces />} />
-                <Route path="/admin/train-model" element={<TrainModel />} />
+                {/* Training module hidden for final submission */}
               </Route>
             </Route>
           </Route>

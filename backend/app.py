@@ -113,11 +113,11 @@ def create_app():
     app.register_blueprint(face_quality_bp,   url_prefix=prefix)
 
     # ── Static file serving (profile/face images) ────────────────────────────
-    storage_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'storage')
+    from config import STORAGE_DIR as _STORAGE_ROOT
 
     @app.route('/storage/<path:filepath>')
     def serve_storage(filepath):
-        return send_from_directory(os.path.abspath(storage_root), filepath)
+        return send_from_directory(os.path.abspath(_STORAGE_ROOT), filepath)
 
     # ── Health check ─────────────────────────────────────────────────────────
     @app.route('/api/health')
@@ -141,8 +141,7 @@ def create_app():
 if __name__ == '__main__':
     app = create_app()
     print('\n' + '=' * 55)
-    print('  Face Recognition Attendance System — Backend v6.1')
+    print('  FaceAttend — AI Attendance System · Backend v6.1')
     print('  Running on http://localhost:5000')
-    print('  Default admin: admin@system.com / admin123')
     print('=' * 55 + '\n')
     app.run(host='0.0.0.0', port=5000, debug=True)

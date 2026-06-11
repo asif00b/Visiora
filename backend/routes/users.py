@@ -61,9 +61,9 @@ def create_user():
         email=data['email'].lower().strip(),
         password_hash=pw_hash,
         role=data['role'],
-        student_id=data.get('student_id'),
-        phone=data.get('phone'),
-        dept_id=data.get('dept_id'),
+        student_id=data.get('student_id') or None,
+        phone=data.get('phone') or None,
+        dept_id=data.get('dept_id') if data.get('dept_id') != '' else None,
     )
     db.session.add(user)
     db.session.commit()
@@ -96,11 +96,11 @@ def update_user(uid):
             return jsonify({'success': False, 'message': 'Email already in use'}), 409
         user.email = data['email'].lower().strip()
     if 'phone' in data:
-        user.phone = data['phone']
+        user.phone = data['phone'] or None
     if 'dept_id' in data:
-        user.dept_id = data['dept_id']
+        user.dept_id = data['dept_id'] if data['dept_id'] != '' else None
     if 'student_id' in data:
-        user.student_id = data['student_id']
+        user.student_id = data['student_id'] or None
     if 'is_active' in data:
         user.is_active = data['is_active']
     if 'role' in data and current.role == 'admin':

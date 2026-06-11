@@ -1,249 +1,324 @@
-"""
-face_engine/arcface_engine.py  —  ArcFace (InsightFace) recognition engine.
+"""InsightFace ArcFace engine with an in-memory FAISS cosine index."""
 
-Accuracy comparison:
-    Dlib (current)       128-d Euclidean       99.38% LFW
-    ArcFace buffalo_l    512-d cosine          99.83% LFW  ← this module
-    Apple Face ID        proprietary depth     99.9999% (hardware-assisted)
-
-ArcFace uses "Additive Angular Margin" metric learning — the same family of
-technology that powers production face recognition at Google, Microsoft, Baidu,
-and Apple.  The buffalo_l model is pre-trained on WebFace600K (600K identities).
-
-Key improvements over dlib:
-    1. 4× larger embedding space (512-d vs 128-d)
-    2. RetinaFace detector — more accurate face bounding boxes
-    3. 5-point landmark alignment — normalises pose/angle before encoding
-    4. Cosine similarity — invariant to embedding magnitude
-    5. Significantly better on non-frontal faces (angled, looking away)
-
-First use downloads ~180 MB of ONNX models to ~/.insightface/models/buffalo_l/
-"""
-
-import io
 import base64
-import importlib.util
+import io
 import logging
+import os
+from threading import RLock
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# ── Availability check ────────────────────────────────────────────────────────
 ARCFACE_AVAILABLE = False
-_INIT_ERROR: str  = ''
+_INIT_ERROR = ""
 
 try:
     from insightface.app import FaceAnalysis
-    import onnxruntime  # noqa: F401 — ensure present
+    from insightface.utils import face_align
+    import onnxruntime as ort
+
     ARCFACE_AVAILABLE = True
-except ImportError as _e:
-    _INIT_ERROR = str(_e)
+except ImportError as exc:
+    _INIT_ERROR = str(exc)
 
-CV2_AVAILABLE = importlib.util.find_spec('cv2') is not None
+try:
+    import cv2
 
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+try:
+    import faiss
+
+    FAISS_AVAILABLE = True
+except ImportError:
+    faiss = None
+    FAISS_AVAILABLE = False
+
 
 def _normalise(emb: np.ndarray) -> np.ndarray:
-    """L2-normalise to unit vector (safe)."""
-    n = float(np.linalg.norm(emb))
-    return emb / n if n > 1e-10 else emb
-
-
-def _cosine_distance(a: np.ndarray, b: np.ndarray) -> float:
-    """1 - cosine-similarity.  0 = identical, ~1.4 = completely different."""
-    return float(1.0 - np.dot(_normalise(a), _normalise(b)))
-
-
-def _batch_cosine_distance(knowns: list, probe: np.ndarray) -> np.ndarray:
-    """Vectorised cosine distances: probe vs all knowns."""
-    if not knowns:
-        return np.array([])
-    K = np.vstack([_normalise(k) for k in knowns])   # (N, 512)
-    p = _normalise(probe)                              # (512,)
-    return 1.0 - (K @ p)                              # (N,)
+    emb = np.asarray(emb, dtype=np.float32)
+    norm = float(np.linalg.norm(emb))
+    return emb / norm if norm > 1e-10 else emb
 
 
 def _box_to_dict(b, image_shape=None) -> dict:
     if image_shape:
         h, w = image_shape[:2]
         return {
-            'left':   float(b[0]) / w,
-            'top':    float(b[1]) / h,
-            'right':  float(b[2]) / w,
-            'bottom': float(b[3]) / h,
+            "left": float(b[0]) / w,
+            "top": float(b[1]) / h,
+            "right": float(b[2]) / w,
+            "bottom": float(b[3]) / h,
         }
-    return {'left': float(b[0]), 'top': float(b[1]),
-            'right': float(b[2]), 'bottom': float(b[3])}
-
-
-def _landmarks_to_dict(face, image_shape) -> dict:
-    kps = getattr(face, 'kps', None)
-    if kps is None or len(kps) < 2:
-        return {}
-    h, w = image_shape[:2]
     return {
-        'left_eye':  {'x': float(kps[0][0]) / w, 'y': float(kps[0][1]) / h},
-        'right_eye': {'x': float(kps[1][0]) / w, 'y': float(kps[1][1]) / h},
+        "left": float(b[0]),
+        "top": float(b[1]),
+        "right": float(b[2]),
+        "bottom": float(b[3]),
     }
 
 
 def _decode_b64_to_rgb(image_data: str):
-    """Decode base64 JPEG/PNG to RGB numpy array (H,W,3)."""
-    if image_data.startswith('data:'):
-        image_data = image_data.split(',', 1)[1]
+    if image_data.startswith("data:"):
+        image_data = image_data.split(",", 1)[1]
     raw = base64.b64decode(image_data)
     if CV2_AVAILABLE:
-        import cv2
         nparr = np.frombuffer(raw, np.uint8)
-        bgr   = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if bgr is None:
             return None
         return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-    else:
-        from PIL import Image
-        img = Image.open(io.BytesIO(raw)).convert('RGB')
-        return np.array(img)
+
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(raw)).convert("RGB")
+    return np.array(img)
 
 
-# ── ArcFace Engine ────────────────────────────────────────────────────────────
+class EmbeddingsDB:
+    def __init__(self):
+        self.known_matrix = None
+        self.known_ids = np.array([], dtype=object)
+        self.index = None
+        self.lock = RLock()
+
+    def build_index(self, cache_dict):
+        vecs, ids = [], []
+        for uid, user_data in cache_dict.items():
+            for emb in user_data["encodings"]:
+                vec = _normalise(emb)
+                if vec.shape[0] != 512:
+                    continue
+                vecs.append(vec)
+                ids.append(int(uid))
+
+        with self.lock:
+            if not vecs:
+                self.known_matrix = None
+                self.known_ids = np.array([], dtype=object)
+                self.index = None
+                return
+
+            matrix = np.ascontiguousarray(np.vstack(vecs).astype("float32"))
+            self.known_matrix = matrix
+            self.known_ids = np.array(ids, dtype=object)
+
+            if FAISS_AVAILABLE:
+                idx = faiss.IndexFlatIP(matrix.shape[1])
+                idx.add(matrix)
+                self.index = idx
+            else:
+                self.index = None
+
+    def match(self, probe_emb, tolerance=0.40):
+        probe = _normalise(probe_emb)
+        with self.lock:
+            if self.known_matrix is None or len(self.known_ids) == 0:
+                return "Unknown", 0.0, 1.0
+
+            probe_matrix = np.ascontiguousarray(probe.reshape(1, -1).astype("float32"))
+            if self.index is not None:
+                similarities, indexes = self.index.search(probe_matrix, 1)
+                best_idx = int(indexes[0][0])
+                best_sim = float(similarities[0][0])
+            else:
+                similarities = np.dot(self.known_matrix, probe)
+                best_idx = int(np.argmax(similarities))
+                best_sim = float(similarities[best_idx])
+
+            best_dist = 1.0 - best_sim
+            if best_dist <= tolerance:
+                return int(self.known_ids[best_idx]), best_sim * 100, best_dist
+            return "Unknown", best_sim * 100, best_dist
+
+    def compare(self, known_list, probe):
+        if not known_list:
+            return np.array([])
+        probe = _normalise(probe)
+        known = np.asarray([_normalise(k) for k in known_list], dtype=np.float32)
+        if known.ndim != 2 or known.shape[1] != probe.shape[0]:
+            return np.array([])
+        return 1.0 - np.dot(known, probe)
+
 
 class ArcFaceEngine:
-    """
-    Drop-in replacement for FaceEngine (dlib) using InsightFace ArcFace.
-
-    Public interface is identical to FaceEngine so no route changes are needed.
-    """
-
-    _instance: 'ArcFaceEngine | None' = None
-
-    # Matches dlib engine class-level constant
-    MAX_ENCODINGS_PER_USER: int = 15
-
-    # ArcFace recommended default thresholds (cosine distance)
-    # Lower = stricter (fewer false positives, more false negatives)
-    DEFAULT_TOLERANCE: float = 0.40   # equivalent to ~90% cosine similarity
+    _instance = None
+    MAX_ENCODINGS_PER_USER = int(os.environ.get("MAX_ENCODINGS_PER_USER", "15"))
+    DEFAULT_TOLERANCE = float(os.environ.get("ARCFACE_TOLERANCE", "0.40"))
 
     @classmethod
-    def get_instance(cls) -> 'ArcFaceEngine':
+    def get_instance(cls):
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
 
     def __init__(self):
-        self._cache: dict = {}   # {user_id: {'name': str, 'encodings': [np512]}}
-        self._app   = None
+        self._cache = {}
+        self._db = EmbeddingsDB()
+        self._app = None
         self._ready = False
-        self._model_name = 'buffalo_l'
+        self._provider = "unavailable"
+        self._model_name = os.environ.get("INSIGHTFACE_MODEL", "buffalo_s")
+        self._det_size = int(os.environ.get("INSIGHTFACE_DET_SIZE", "320"))
 
         if not ARCFACE_AVAILABLE:
-            logger.warning(f'[ArcFace] InsightFace not available: {_INIT_ERROR}')
+            logger.warning("[ArcFace] Not available: %s", _INIT_ERROR)
             return
 
-        try:
-            # Try GPU first (CUDA), fall back to CPU automatically
-            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-            self._app = FaceAnalysis(name=self._model_name, providers=providers)
-            # ctx_id=0 = GPU, ctx_id=-1 = CPU
-            self._app.prepare(ctx_id=0, det_size=(640, 640))
-            self._ready = True
-            gpu = any('CUDA' in str(p) for p in self._app.models)
-            logger.info(f'[ArcFace] buffalo_l loaded | GPU={gpu} | det_size=640')
-        except Exception as e:
-            logger.error(f'[ArcFace] Init failed: {e}')
-            self._ready = False
+        self._ready = self._init_model()
 
-    # ── Properties ────────────────────────────────────────────────────────────
+    def _init_model(self):
+        force_cpu = os.environ.get("ARCFACE_FORCE_CPU", "false").lower() == "true"
+        available = set(ort.get_available_providers())
+        use_cuda = "CUDAExecutionProvider" in available and not force_cpu
+        providers = (
+            ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            if use_cuda
+            else ["CPUExecutionProvider"]
+        )
+        ctx_id = 0 if use_cuda else -1
+
+        try:
+            self._app = FaceAnalysis(
+                name=self._model_name,
+                providers=providers,
+                allowed_modules=["detection", "recognition"],
+            )
+            self._app.prepare(ctx_id=ctx_id, det_size=(self._det_size, self._det_size))
+        except Exception as exc:
+            if use_cuda:
+                logger.warning("[ArcFace] CUDA init failed, retrying CPU: %s", exc)
+                self._app = FaceAnalysis(
+                    name=self._model_name,
+                    providers=["CPUExecutionProvider"],
+                    allowed_modules=["detection", "recognition"],
+                )
+                self._app.prepare(ctx_id=-1, det_size=(self._det_size, self._det_size))
+            else:
+                logger.error("[ArcFace] Init failed: %s", exc)
+                return False
+
+        self._provider = self._active_provider()
+        self._warmup()
+        logger.info(
+            "[ArcFace] %s ready | provider=%s | det_size=%s | faiss=%s",
+            self._model_name,
+            self._provider,
+            self._det_size,
+            FAISS_AVAILABLE,
+        )
+        return True
+
+    def _active_provider(self):
+        try:
+            providers = set()
+            for model in self._app.models.values():
+                session = getattr(model, "session", None)
+                if session is not None:
+                    providers.update(session.get_providers())
+            if "CUDAExecutionProvider" in providers:
+                return "CUDAExecutionProvider"
+            if providers:
+                return sorted(providers)[0]
+        except Exception:
+            pass
+        return "CPUExecutionProvider"
+
+    def _warmup(self):
+        try:
+            dummy = np.zeros((self._det_size, self._det_size, 3), dtype=np.uint8)
+            self._app.det_model.detect(dummy, max_num=1)
+        except Exception:
+            pass
 
     @property
-    def available(self) -> bool:
+    def available(self):
         return self._ready
 
     @property
-    def gpu_available(self) -> bool:
-        return False  # actual GPU detection done in _init
+    def gpu_available(self):
+        return self._provider == "CUDAExecutionProvider"
 
     @property
-    def recommended_model(self) -> str:
-        return 'arcface-buffalo_l'
+    def recommended_model(self):
+        return f"arcface-{self._model_name}"
 
     @property
-    def backend(self) -> str:
-        return 'arcface'
+    def backend(self):
+        return "arcface"
 
-    def cache_size(self) -> int:
-        return len([uid for uid, v in self._cache.items() if v['encodings']])
-
-    # ── Image decoding ────────────────────────────────────────────────────────
+    def cache_size(self):
+        return sum(len(v["encodings"]) for v in self._cache.values())
 
     def decode_image(self, image_data: str):
         return _decode_b64_to_rgb(image_data)
 
-    # ── Core: single-face encoding ────────────────────────────────────────────
-
     def _get_face_embedding(self, image_rgb: np.ndarray):
-        """
-        Detect the largest / most confident face and return (embedding, bbox).
-        embedding: normalised 512-d numpy array
-        bbox:      [x1, y1, x2, y2]
-        Returns (None, None) if no face found.
-        """
         if not self._ready:
             return None, None
         faces = self._app.get(image_rgb)
         if not faces:
             return None, None
-        # Pick the most confident detection
         face = max(faces, key=lambda f: float(f.det_score))
-        return np.array(face.normed_embedding), face.bbox
-
-    # ── Registration encoding ─────────────────────────────────────────────────
+        return np.array(face.normed_embedding, dtype=np.float32), face.bbox
 
     def encode_face_for_registration(
-        self,
-        image_rgb: np.ndarray,
-        model: str = 'hog',          # ignored — ArcFace uses RetinaFace
-        min_face_size: int = 40,
-        num_jitters: int = 2,        # ignored — ONNX is deterministic
-    ) -> dict:
-        """
-        Encode a single image for registration storage.
-        Returns dict matching FaceEngine.encode_face_for_registration().
-        """
+        self, image_rgb: np.ndarray, model="hog", min_face_size=40, num_jitters=2
+    ):
         if not self._ready:
-            return {'success': False, 'message': 'ArcFace engine not initialised', 'encoding': None, 'face_box': None}
+            return {
+                "success": False,
+                "message": "Engine not ready",
+                "encoding": None,
+                "face_box": None,
+            }
 
         faces = self._app.get(image_rgb)
         if not faces:
-            return {'success': False, 'message': 'No face detected in image', 'encoding': None, 'face_box': None}
+            return {
+                "success": False,
+                "message": "No face detected",
+                "encoding": None,
+                "face_box": None,
+            }
 
-        h, w = image_rgb.shape[:2]
-        # Filter by minimum face size
-        faces = [f for f in faces
-                 if (f.bbox[2] - f.bbox[0]) >= min_face_size
-                 and (f.bbox[3] - f.bbox[1]) >= min_face_size]
+        faces = [
+            f
+            for f in faces
+            if (f.bbox[2] - f.bbox[0]) >= min_face_size
+            and (f.bbox[3] - f.bbox[1]) >= min_face_size
+        ]
         if not faces:
-            return {'success': False, 'message': f'Face too small (min {min_face_size}px)', 'encoding': None, 'face_box': None}
-
+            return {
+                "success": False,
+                "message": "Face too small",
+                "encoding": None,
+                "face_box": None,
+            }
         if len(faces) > 1:
-            return {'success': False, 'message': f'{len(faces)} faces detected — use single-person images', 'encoding': None, 'face_box': None}
+            return {
+                "success": False,
+                "message": "Multiple faces detected",
+                "encoding": None,
+                "face_box": None,
+            }
 
-        face     = faces[0]
-        emb      = np.array(face.normed_embedding)   # already L2-normalised
-        bbox     = face.bbox                          # [x1,y1,x2,y2]
-        det_conf = float(face.det_score)
+        face = faces[0]
+        # Convert InsightFace kps (keypoints) to a serializable list of dicts
+        kpss = [{"x": float(p[0]), "y": float(p[1])} for p in face.kps] if hasattr(face, 'kps') else []
 
         return {
-            'success':    True,
-            'encoding':   emb,
-            'face_box':   _box_to_dict(bbox),
-            'message':    f'ArcFace OK (det_score={det_conf:.3f})',
+            "success": True,
+            "encoding": np.array(face.normed_embedding, dtype=np.float32),
+            "face_box": _box_to_dict(face.bbox),
+            "kpss": kpss,
+            "message": f"ArcFace OK (det_score={float(face.det_score):.3f})",
         }
 
-    # ── Cache management ──────────────────────────────────────────────────────
-
     def load_from_db(self):
-        """Load ALL face encodings (512-d ArcFace) from the database into memory."""
         if not self._ready:
             return
         from models.face_encoding import FaceEncoding
@@ -251,16 +326,11 @@ class ArcFaceEngine:
         from sqlalchemy import case
 
         self._cache.clear()
-
         all_encodings = (
-            FaceEncoding.query
-            .join(User)
+            FaceEncoding.query.join(User)
             .filter(User.is_active == True)
             .order_by(
-                case(
-                    (FaceEncoding.quality_score == None, 1),
-                    else_=0
-                ).asc(),
+                case((FaceEncoding.quality_score == None, 1), else_=0).asc(),
                 FaceEncoding.quality_score.desc(),
                 FaceEncoding.created_at.desc(),
             )
@@ -269,195 +339,144 @@ class ArcFaceEngine:
 
         loaded = user_count = skipped = 0
         for enc in all_encodings:
-            uid = enc.user_id
-            raw = enc.get_encoding()
-            if raw is None:
+            uid = int(enc.user_id)
+            try:
+                arr = np.array(enc.get_encoding(), dtype=np.float32)
+            except Exception:
+                skipped += 1
                 continue
 
-            arr = np.array(raw)
-
-            # ── Dimension check ─────────────────────────────────────────────
-            # ArcFace = 512-d, dlib = 128-d.  Skip mismatched encodings.
             if arr.shape[0] != 512:
                 skipped += 1
                 continue
 
             if uid not in self._cache:
                 self._cache[uid] = {
-                    'name':      enc.user.name if enc.user else f'User {uid}',
-                    'encodings': [],
+                    "name": enc.user.name if enc.user else f"User {uid}",
+                    "encodings": [],
                 }
                 user_count += 1
-
-            if len(self._cache[uid]['encodings']) >= self.MAX_ENCODINGS_PER_USER:
+            if len(self._cache[uid]["encodings"]) >= self.MAX_ENCODINGS_PER_USER:
                 continue
 
-            self._cache[uid]['encodings'].append(arr)
+            self._cache[uid]["encodings"].append(_normalise(arr))
             loaded += 1
 
+        self._db.build_index(self._cache)
         logger.info(
-            f'[ArcFace] Cache loaded — {loaded} 512-d encoding(s) for '
-            f'{user_count} user(s). Skipped {skipped} incompatible (128-d) encoding(s).'
+            "[ArcFace] DB loaded: %s encodings | %s users | skipped %s",
+            loaded,
+            user_count,
+            skipped,
         )
 
     def add_to_cache(self, user_id: int, name: str, encoding_array):
-        """Replace cache for one user with a single encoding."""
-        self._cache[user_id] = {
-            'name':      name,
-            'encodings': [np.array(encoding_array)],
+        self._cache[int(user_id)] = {
+            "name": name,
+            "encodings": [_normalise(np.array(encoding_array))],
         }
+        self._db.build_index(self._cache)
 
     def add_encodings_to_cache(self, user_id: int, name: str, encoding_arrays: list) -> int:
-        """Append new encodings (with dedup) to existing cache entry."""
+        user_id = int(user_id)
         if user_id not in self._cache:
-            self._cache[user_id] = {'name': name, 'encodings': []}
-        existing = self._cache[user_id]['encodings']
+            self._cache[user_id] = {"name": name, "encodings": []}
+        existing = self._cache[user_id]["encodings"]
         added = 0
         for arr in encoding_arrays:
             narr = _normalise(np.array(arr))
+            if narr.shape[0] != 512:
+                continue
             if existing:
-                dists = _batch_cosine_distance(existing, narr)
-                if float(np.min(dists)) < 0.30:   # very tight dedup for ArcFace
+                dists = self.compare_encodings(existing, narr)
+                if len(dists) and float(np.min(dists)) < 0.12:
                     continue
             if len(existing) < self.MAX_ENCODINGS_PER_USER:
                 existing.append(narr)
                 added += 1
+        self._db.build_index(self._cache)
         return added
 
-    def compare_encodings(self, known_list: list, probe) -> np.ndarray:
-        """
-        Engine-agnostic comparison: returns cosine distances between
-        each known encoding and the probe.
-
-        Args:
-            known_list: list of numpy arrays (512-d ArcFace embeddings)
-            probe:      numpy array (512-d)
-
-        Returns:
-            numpy array of distances (0 = identical, 1 = opposite)
-        """
-        if not known_list:
-            return np.array([])
-        probe_arr = _normalise(np.array(probe))
-        return _batch_cosine_distance(known_list, probe_arr)
-
     def remove_from_cache(self, user_id: int):
-        self._cache.pop(user_id, None)
-
-    # ── Recognition ──────────────────────────────────────────────────────────
+        self._cache.pop(int(user_id), None)
+        self._db.build_index(self._cache)
 
     def recognize(
         self,
         image_data: str,
         tolerance: float = 0.40,
-        model: str = 'hog',
+        model: str = "hog",
         include_embeddings: bool = False,
         image_rgb=None,
+        scanner_id="default",
     ) -> list:
-        """
-        Detect and identify all faces in an image.
-
-        Returns list of dicts identical to FaceEngine.recognize():
-            {
-                'matched':   bool,
-                'user_id':   int | None,
-                'name':      str,
-                'distance':  float,   # cosine distance (0 = perfect match)
-                'box':       dict,
-            }
-        """
         if not self._ready:
             return []
-
         image_rgb = image_rgb if image_rgb is not None else self.decode_image(image_data)
         if image_rgb is None:
-            logger.warning('[ArcFace] recognize: image decode failed')
             return []
 
-        faces = self._app.get(image_rgb)
-        if not faces:
-            return []
+        from face_engine.tracker_pipeline import TrackingPipeline
 
-        # Prepare known encodings for vectorised comparison
-        user_ids   = sorted(self._cache.keys())
-        known_vecs = []
-        uid_map    = []   # parallel list: which user_id each vector belongs to
+        pipeline = TrackingPipeline.get_instance()
 
-        for uid in user_ids:
-            for enc in self._cache[uid]['encodings']:
-                known_vecs.append(_normalise(enc))
-                uid_map.append(uid)
+        def detector_func(frame):
+            return self._app.det_model.detect(frame, max_num=10, metric="default")
 
-        results = []
+        def recognizer_func(frame, crops_info):
+            results = []
+            for bbox, kps in crops_info:
+                if kps is None:
+                    results.append(_unknown_result())
+                    continue
 
-        for face in faces:
-            probe    = _normalise(np.array(face.normed_embedding))
-            det_conf = float(face.det_score)
-            bbox     = face.bbox
+                try:
+                    aligned = face_align.norm_crop(frame, landmark=np.asarray(kps), image_size=112)
+                    if CV2_AVAILABLE and cv2.Laplacian(aligned, cv2.CV_64F).var() < 45:
+                        results.append(_unknown_result())
+                        continue
 
-            if not known_vecs:
-                result = {
-                    'matched':  False,
-                    'user_id':  None,
-                    'name':     'Unknown',
-                    'distance': 1.0,
-                    'box':      _box_to_dict(bbox, image_rgb.shape),
-                    'det_score': det_conf,
-                }
-                if include_embeddings:
-                    result['_embedding'] = probe
-                    result['landmarks'] = _landmarks_to_dict(face, image_rgb.shape)
-                results.append(result)
-                continue
+                    emb = self._app.models["recognition"].get_feat(aligned)[0]
+                    uid, conf, dist = self._db.match(emb, tolerance)
+                    name = self._cache[int(uid)]["name"] if uid != "Unknown" else "Unknown"
+                    result = {
+                        "user_id": uid,
+                        "confidence": conf,
+                        "name": name,
+                        "distance": dist,
+                    }
+                    if include_embeddings:
+                        result["_embedding"] = np.asarray(emb, dtype=np.float32).tolist()
+                    results.append(result)
+                except Exception as exc:
+                    logger.debug("[ArcFace] Recognition crop skipped: %s", exc)
+                    results.append(_unknown_result())
+            return results
 
-            # Vectorised cosine distances
-            all_dists = _batch_cosine_distance(known_vecs, probe)
+        return pipeline.process_frame(scanner_id, image_rgb, detector_func, recognizer_func)
 
-            best_idx  = int(np.argmin(all_dists))
-            best_dist = float(all_dists[best_idx])
-            best_uid  = uid_map[best_idx]
+    def compare_encodings(self, known_list: list, probe) -> np.ndarray:
+        return self._db.compare(known_list, probe)
 
-            if best_dist <= tolerance:
-                result = {
-                    'matched':   True,
-                    'user_id':   best_uid,
-                    'name':      self._cache[best_uid]['name'],
-                    'distance':  round(best_dist, 4),
-                    'box':       _box_to_dict(bbox, image_rgb.shape),
-                    'det_score': round(det_conf, 3),
-                }
-            else:
-                result = {
-                    'matched':   False,
-                    'user_id':   None,
-                    'name':      'Unknown',
-                    'distance':  round(best_dist, 4),
-                    'box':       _box_to_dict(bbox, image_rgb.shape),
-                    'det_score': round(det_conf, 3),
-                }
+    def is_duplicate_unknown(
+        self,
+        new_encoding: np.ndarray,
+        existing_encodings: list,
+        threshold: float = 0.45,
+    ) -> bool:
+        """Check if new_encoding is a duplicate of any in existing_encodings.
 
-            if include_embeddings:
-                result['_embedding'] = probe
-                result['landmarks'] = _landmarks_to_dict(face, image_rgb.shape)
-            results.append(result)
-
-        return results
-
-    # ── Unknown face deduplication ────────────────────────────────────────────
-
-    def is_duplicate_unknown(self, encoding_array, threshold: float = 0.45) -> bool:
-        """Check if an encoding is too similar to any cached known face."""
-        if not self._cache:
+        Matches the dlib FaceEngine signature so callers (e.g. admin cleanup)
+        can use either engine interchangeably.
+        """
+        if not existing_encodings:
             return False
-        probe = _normalise(np.array(encoding_array))
-        all_known = [e for v in self._cache.values() for e in v['encodings']]
-        if not all_known:
+        dists = self.compare_encodings(existing_encodings, new_encoding)
+        if len(dists) == 0:
             return False
-        dists = _batch_cosine_distance(all_known, probe)
-        return bool(np.min(dists) < threshold)
+        return float(np.min(dists)) < threshold
 
     def get_unknown_encoding(self, image_data: str):
-        """Encode an unknown face image for deduplication storage."""
         image_rgb = self.decode_image(image_data)
         if image_rgb is None:
             return None
@@ -465,18 +484,18 @@ class ArcFaceEngine:
         return emb.tolist() if emb is not None else None
 
 
-# ── Convenience: check if arcface is set up ───────────────────────────────────
+def _unknown_result():
+    return {
+        "user_id": "Unknown",
+        "confidence": 0,
+        "name": "Unknown",
+        "distance": 1.0,
+    }
+
 
 def arcface_available() -> bool:
     return ARCFACE_AVAILABLE
 
 
 def arcface_ready() -> bool:
-    """Returns True only if the model files are downloaded and loaded."""
-    if not ARCFACE_AVAILABLE:
-        return False
-    try:
-        eng = ArcFaceEngine.get_instance()
-        return eng.available
-    except Exception:
-        return False
+    return ARCFACE_AVAILABLE and ArcFaceEngine.get_instance().available

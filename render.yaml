@@ -1,0 +1,45 @@
+# Render Blueprint — Infrastructure as Code
+# Deploy: Connect this repo on render.com and it auto-detects this file
+
+databases:
+  - name: faceattend-db
+    plan: free
+    databaseName: attendance_db
+    postgresMajorVersion: 16
+    ipAllowList: []  # only internal connections
+
+services:
+  - type: web
+    name: faceattend-api
+    runtime: python
+    plan: free
+    region: singapore           # closest to Bangladesh
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:create_app() --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: faceattend-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: FRONTEND_URL
+        sync: false              # set manually after Vercel deploy
+      - key: INSIGHTFACE_MODEL
+        value: buffalo_s
+      - key: INSIGHTFACE_DET_SIZE
+        value: "320"
+      - key: ARCFACE_FORCE_CPU
+        value: "true"            # Render free tier has no GPU
+      - key: STORAGE_DIR
+        value: /opt/render/project/storage
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+    disk:
+      name: faceattend-storage
+      mountPath: /opt/render/project/storage
+      sizeGB: 1

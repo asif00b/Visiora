@@ -1,23 +1,26 @@
 @echo off
 setlocal enabledelayedexpansion
 
-title Face Recognition Attendance System — Setup
+title Face Recognition Attendance System - Setup
 color 0A
 
+if "%DATABASE_URL%"=="" set "DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/attendance_db"
+if "%INSIGHTFACE_MODEL%"=="" set "INSIGHTFACE_MODEL=buffalo_s"
+if "%INSIGHTFACE_DET_SIZE%"=="" set "INSIGHTFACE_DET_SIZE=320"
+if "%TRACKER_ALGORITHM%"=="" set "TRACKER_ALGORITHM=KCF"
+
 echo.
 echo ============================================================
-echo   Face Recognition Attendance System — Setup
-echo   Version 6 ^| XAMPP MySQL
+echo   Face Recognition Attendance System - Setup
+echo   PostgreSQL + pgvector + InsightFace
 echo ============================================================
 echo.
 
-REM ── Check Python ────────────────────────────────────────────
-echo [1/6] Checking Python...
+echo [1/5] Checking Python...
 python --version >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] Python is not installed or not on PATH.
-    echo         Download Python 3.9 or 3.10 from https://python.org
-    echo         Make sure to check "Add Python to PATH" during install.
+    echo         Install Python 3.10 and enable "Add Python to PATH".
     pause
     exit /b 1
 )
@@ -25,118 +28,82 @@ for /f "tokens=2 delims= " %%v in ('python --version 2^>^&1') do set PYVER=%%v
 echo [OK] Python %PYVER% found.
 echo.
 
-REM ── Check XAMPP MySQL ────────────────────────────────────────
-echo [2/6] Checking XAMPP MySQL connection...
-python -c "import pymysql; pymysql.connect(host='localhost',port=3306,user='root',password='',connect_timeout=3)" >nul 2>&1
-if errorlevel 1 (
-    echo.
-    echo [WARNING] Could not connect to MySQL at localhost:3306
-    echo           Make sure XAMPP is running and MySQL is started (green light).
-    echo           Press any key to continue anyway, or Ctrl+C to abort.
-    pause
-) else (
-    echo [OK] XAMPP MySQL is reachable.
-)
-echo.
-
-REM ── Create virtual environment ───────────────────────────────
-echo [3/6] Setting up Python virtual environment...
+echo [2/5] Creating Python virtual environment...
 cd /d "%~dp0backend"
-
 if not exist venv (
     python -m venv venv
     echo [OK] Virtual environment created.
 ) else (
     echo [OK] Virtual environment already exists.
 )
-echo.
-
-REM ── Activate venv ────────────────────────────────────────────
 call venv\Scripts\activate.bat
-
-REM ── Upgrade pip silently ─────────────────────────────────────
-echo [4/6] Upgrading pip...
-python -m pip install --upgrade pip --quiet
-echo [OK] pip upgraded.
 echo.
 
-REM ── Core dependencies (no dlib yet) ─────────────────────────
-echo [5/6] Installing Python packages...
-
-python -m pip install --quiet ^
-    "flask>=3.0.0" ^
-    "flask-cors>=4.0.0" ^
-    "flask-jwt-extended>=4.6.0" ^
-    "flask-sqlalchemy>=3.1.0" ^
-    "sqlalchemy>=2.0.0" ^
-    "bcrypt>=4.0.0" ^
-    "PyMySQL>=1.1.0" ^
-    "numpy>=1.24.0,<2.0.0" ^
-    "Pillow>=10.0.0" ^
-    "opencv-python-headless>=4.8.0"
-
+echo [3/5] Installing backend packages...
+python -m pip install --upgrade pip --quiet
+python -m pip install --quiet -r requirements.txt
 if errorlevel 1 (
-    echo [ERROR] Failed to install core packages.
+    echo [ERROR] Backend package installation failed.
+    echo         If faiss-cpu is unavailable on your Windows Python build,
+    echo         install FAISS with Conda or temporarily remove faiss-cpu;
+    echo         the app will fall back to NumPy matching until FAISS is installed.
     pause
     exit /b 1
 )
-echo [OK] Core packages installed.
+echo [OK] Backend packages installed.
 echo.
 
-REM ── Try installing dlib + face_recognition ───────────────────
-echo [5b] Installing face_recognition (this may take a few minutes)...
-echo      If this fails, see the manual instructions below.
-echo.
-
-REM Try pre-compiled dlib wheel first (no cmake needed)
-python -m pip install --quiet dlib 2>nul
+echo [4/5] Checking PostgreSQL and pgvector...
+python -c "import os; from sqlalchemy import create_engine,text; e=create_engine(os.environ['DATABASE_URL']); c=e.connect(); c.execute(text('CREATE EXTENSION IF NOT EXISTS vector')); c.commit(); c.close(); print('[OK] PostgreSQL reachable and pgvector enabled')"
 if errorlevel 1 (
-    echo [WARNING] Could not install dlib automatically.
     echo.
-    echo ┌─────────────────────────────────────────────────────────┐
-    echo │  MANUAL dlib INSTALLATION (Windows)                    │
-    echo │                                                         │
-    echo │  Option A — Pre-built wheel (easiest):                 │
-    echo │    1. Go to: https://github.com/z-mahmud22/Dlib_Windows_Python3.x
-    echo │    2. Download the .whl for YOUR Python version         │
-    echo │       (e.g. dlib-19.24.1-cp310-cp310-win_amd64.whl)   │
-    echo │    3. Run: pip install path\to\dlib.whl                │
-    echo │    4. Then run this setup.bat again                     │
-    echo │                                                         │
-    echo │  Option B — Build from source:                         │
-    echo │    1. Install CMake: https://cmake.org/download/        │
-    echo │    2. Install Visual Studio Build Tools                 │
-    echo │    3. Run: pip install dlib                             │
-    echo └─────────────────────────────────────────────────────────┘
+    echo [ERROR] Cannot connect to PostgreSQL using DATABASE_URL:
+    echo         %DATABASE_URL%
     echo.
-    echo [INFO] Skipping face_recognition for now. Install dlib manually.
-    echo        The rest of the system will still work.
+    echo Create the database first, then run setup again:
+    echo   createdb attendance_db
+    echo   psql -d attendance_db -c "CREATE EXTENSION vector;"
+    pause
+    exit /b 1
+)
+
+echo [4b] Creating tables and default admin...
+python -c "from flask import Flask; from config import Config; from database import init_db; import models; app=Flask('init'); app.config.from_object(Config); init_db(app); print('[OK] Database schema ready')"
+if errorlevel 1 (
+    echo [ERROR] Database initialization failed.
+    pause
+    exit /b 1
+)
+echo.
+
+if exist database.db (
+    echo [INFO] Existing legacy database found: backend\database.db
+    echo        To migrate it into PostgreSQL, run:
+    echo        cd backend
+    echo        venv\Scripts\python scripts\migrate_to_postgres.py
+    echo.
+)
+
+echo [5/5] Installing frontend packages...
+cd /d "%~dp0frontend"
+if not exist node_modules (
+    npm install
 ) else (
-    python -m pip install --quiet "face-recognition>=1.3.0"
-    if errorlevel 1 (
-        echo [WARNING] face-recognition install failed after dlib succeeded.
-        echo           Try:  pip install face-recognition
-    ) else (
-        echo [OK] face_recognition installed.
-    )
+    npm install
 )
-echo.
-
-REM ── Create MySQL database ────────────────────────────────────
-echo [6/6] Creating MySQL database...
-python create_mysql_db.py
 if errorlevel 1 (
-    echo [WARNING] Could not create MySQL database automatically.
-    echo           Make sure XAMPP MySQL is running and try again.
-    echo           Or create database manually: CREATE DATABASE attendance_db CHARACTER SET utf8mb4;
+    echo [ERROR] Frontend package installation failed.
+    pause
+    exit /b 1
 )
+echo [OK] Frontend packages installed.
 echo.
 
 echo ============================================================
-echo   Setup complete!
+echo   Setup complete.
 echo.
-echo   To start the system:  run start.bat
-echo   Admin login:          admin@system.com / admin123
+echo   Start the system with: start.bat
+echo   Admin login: admin@system.com / admin123
 echo ============================================================
 echo.
 pause

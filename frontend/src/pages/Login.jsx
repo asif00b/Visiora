@@ -112,7 +112,7 @@ export default function Login() {
           </form>
 
           <div className="mt-6 pt-4 border-t border-slate-700/50 text-center">
-            <p className="text-xs text-slate-600">Default: admin@system.com / admin123</p>
+            <p className="text-xs text-slate-600">© {new Date().getFullYear()} FaceAttend · AI-Powered Attendance</p>
           </div>
         </div>
       </div>

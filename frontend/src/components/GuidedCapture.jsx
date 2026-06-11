@@ -26,26 +26,27 @@ const STEPS = [
 const TOTAL_CAPTURES = 3
 
 export default function GuidedCapture({ onCapture, maxImages = TOTAL_CAPTURES }) {
-  const { videoRef, canvasRef, isActive, error, startCamera, stopCamera, captureFrame } = useCamera()
+  const { videoRef, canvasRef, isActive, error, devices, startCamera, stopCamera, captureFrame } = useCamera()
   const overlayRef   = useRef(null)
   const animRef      = useRef(null)
   const analyzeRef   = useRef(null)
-  const holdTimer    = useRef(null)
 
   const [captures, setCaptures]       = useState([])
   const [stepIdx, setStepIdx]         = useState(0)
   const [instruction, setInstruction] = useState('Starting camera…')
   const [status, setStatus]           = useState('waiting')  // waiting | analyzing | hold | captured | done
   const [holdProgress, setHoldProgress] = useState(0)        // 0–100
+  const [selectedCamera, setSelectedCamera] = useState('')
+  const [videoRotation, setVideoRotation] = useState(0)
 
   const currentStep = STEPS[stepIdx] || STEPS[0]
   const isDone = captures.length >= TOTAL_CAPTURES
 
-  // ── Auto-start camera on mount ──────────────────────────────────────────
+  // ── Auto-start camera on mount or camera switch ──────────────────────────
   useEffect(() => {
-    startCamera()
+    startCamera(selectedCamera || null)
     return () => stopCamera()
-  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedCamera, startCamera, stopCamera])
 
   // ── Draw oval guide ─────────────────────────────────────────────────────
   const drawGuide = useCallback(() => {
@@ -60,8 +61,10 @@ export default function GuidedCapture({ onCapture, maxImages = TOTAL_CAPTURES })
 
     const cx = canvas.width / 2
     const cy = canvas.height / 2
-    const rx = canvas.width  * 0.22
-    const ry = canvas.height * 0.36
+    // Make the oval proportional to a human face (aspect ratio ~ 1 : 1.3)
+    const minDim = Math.min(canvas.width, canvas.height)
+    const rx = minDim * 0.30
+    const ry = rx * 1.35
 
     // Dark vignette
     ctx.save()
@@ -109,119 +112,163 @@ export default function GuidedCapture({ onCapture, maxImages = TOTAL_CAPTURES })
 
   // ── Capture a frame ─────────────────────────────────────────────────────
   const doCapture = useCallback(() => {
-    const frame = captureFrame(0.92)
+    const frame = captureFrame(0.92, videoRotation)
     if (!frame) return
 
     const next = [...captures, frame]
     setCaptures(next)
     setStatus('captured')
+    setHoldProgress(100)
 
     if (next.length >= TOTAL_CAPTURES) {
-      // All done
       setInstruction('All photos captured! ✓')
       setStatus('done')
       if (onCapture) onCapture(next)
     } else {
-      // Move to next step after a brief pause
+      // Give user 1.5s to physically turn their head before next step
       setTimeout(() => {
         setStepIdx(prev => prev + 1)
-        setStatus('analyzing')
+        setStatus('waiting')
         setHoldProgress(0)
-      }, 1000)
+        goodFramesRef.current = 0
+      }, 1500)
     }
-  }, [captures, captureFrame, onCapture])
+  }, [captures, captureFrame, onCapture, videoRotation])
 
   // ── Poll backend for face analysis ──────────────────────────────────────
+  // Count consecutive "good" frames. 2 good frames = capture.
+  // Any bad frame resets counter to 0 and oval color resets.
+  const isProcessingRef = useRef(false)
+  const goodFramesRef   = useRef(0)
+  const FRAMES_TO_CAPTURE = 2
+
+  // Minimum yaw angle (degrees) to count as "turned"
+  const YAW_THRESHOLD = 12
+
   useEffect(() => {
     if (!isActive || isDone) return
 
     const analyze = async () => {
       if (status === 'captured' || status === 'done') return
+      if (isProcessingRef.current) return
 
-      const frame = captureFrame(0.6)
+      const frame = captureFrame(0.6, videoRotation)
       if (!frame) return
 
+      isProcessingRef.current = true
       try {
         const res = await api.post('/api/face/analyze-frame', { image: frame })
         const d   = res.data
+        const yaw = d.yaw_angle ?? 0
 
+        // ── Any failure → reset immediately (oval goes non-green) ──
         if (!d.face_detected) {
+          goodFramesRef.current = 0
+          setStatus('analyzing')
+          setHoldProgress(0)
           setInstruction('Position your face in the oval')
-          setStatus('analyzing')
-          setHoldProgress(0)
-          clearTimeout(holdTimer.current)
           return
         }
-
         if (!d.face_size_ok) {
+          goodFramesRef.current = 0
+          setStatus('analyzing')
+          setHoldProgress(0)
           setInstruction('Move closer to the camera')
-          setStatus('analyzing')
-          setHoldProgress(0)
-          clearTimeout(holdTimer.current)
           return
         }
-
         if (!d.face_centered) {
+          goodFramesRef.current = 0
+          setStatus('analyzing')
+          setHoldProgress(0)
           setInstruction('Center your face in the oval')
-          setStatus('analyzing')
-          setHoldProgress(0)
-          clearTimeout(holdTimer.current)
           return
         }
 
-        // Face is good — check step-specific condition
+        // Step 1: Smile check
         if (currentStep.needsSmile && !d.is_smiling) {
-          setInstruction('Now smile! 😊')
+          goodFramesRef.current = 0
           setStatus('analyzing')
           setHoldProgress(0)
-          clearTimeout(holdTimer.current)
+          setInstruction('Now smile! 😊')
           return
         }
 
-        // For angle steps (left/right), just need face detected + centered
-        if (!currentStep.needsSmile && stepIdx > 0) {
-          setInstruction(currentStep.label + ' — hold still…')
+        // Step 2: Must actually turn head LEFT (yaw < -threshold)
+        if (currentStep.id === 'left' && yaw > -YAW_THRESHOLD) {
+          goodFramesRef.current = 0
+          setStatus('analyzing')
+          setHoldProgress(0)
+          setInstruction(`Turn your head to the LEFT ← (yaw: ${yaw.toFixed(0)}°)`)
+          return
+        }
+
+        // Step 3: Must actually turn head RIGHT (yaw > +threshold)
+        if (currentStep.id === 'right' && yaw < YAW_THRESHOLD) {
+          goodFramesRef.current = 0
+          setStatus('analyzing')
+          setHoldProgress(0)
+          setInstruction(`Turn your head to the RIGHT → (yaw: ${yaw.toFixed(0)}°)`)
+          return
+        }
+
+        // ── All conditions met — count this good frame ──
+        goodFramesRef.current += 1
+        const progress = Math.min(100, Math.round((goodFramesRef.current / FRAMES_TO_CAPTURE) * 100))
+        setHoldProgress(progress)
+        setStatus('hold')
+
+        if (currentStep.id === 'left') {
+          setInstruction('Good! Hold still… ←')
+        } else if (currentStep.id === 'right') {
+          setInstruction('Good! Hold still… →')
         } else {
           setInstruction('Perfect! Hold still… ✓')
         }
 
-        // Start hold timer if not already counting
-        if (status !== 'hold') {
-          setStatus('hold')
-          setHoldProgress(0)
-          let progress = 0
-          clearTimeout(holdTimer.current)
-
-          const tick = () => {
-            progress += 20
-            setHoldProgress(progress)
-            if (progress >= 100) {
-              doCapture()
-            } else {
-              holdTimer.current = setTimeout(tick, 200)
-            }
-          }
-          holdTimer.current = setTimeout(tick, 200)
+        // ── Enough consecutive good frames → capture! ──
+        if (goodFramesRef.current >= FRAMES_TO_CAPTURE) {
+          goodFramesRef.current = 0
+          doCapture()
         }
       } catch {
         // Network error — keep trying
+      } finally {
+        isProcessingRef.current = false
       }
     }
 
-    analyzeRef.current = setInterval(analyze, 500)
-    return () => {
-      clearInterval(analyzeRef.current)
-      clearTimeout(holdTimer.current)
-    }
-  }, [isActive, isDone, status, stepIdx, currentStep, captureFrame, doCapture])
+    analyzeRef.current = setInterval(analyze, 350)
+    return () => clearInterval(analyzeRef.current)
+  }, [isActive, isDone, status, stepIdx, currentStep, captureFrame, doCapture, videoRotation])
 
   // Cleanup
-  useEffect(() => () => { clearTimeout(holdTimer.current); clearInterval(analyzeRef.current) }, [])
+  useEffect(() => () => clearInterval(analyzeRef.current), [])
 
   const StepIcon = currentStep.icon
 
   return (
     <div className="space-y-4">
+      {/* Camera selector & Rotate */}
+      <div className="flex justify-center items-center gap-2 mb-2">
+        {devices.length > 1 && (
+          <select
+            value={selectedCamera}
+            onChange={e => setSelectedCamera(e.target.value)}
+            className="select text-sm w-full sm:max-w-xs"
+          >
+            <option value="">Default Camera</option>
+            {devices.map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${i + 1}`}</option>)}
+          </select>
+        )}
+        <button
+          onClick={() => setVideoRotation(r => (r + 90) % 360)}
+          className="p-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 transition-colors"
+          title="Rotate Camera 90°"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+        </button>
+      </div>
+
       {/* Progress dots */}
       <div className="flex items-center justify-center gap-3">
         {STEPS.map((s, i) => (
@@ -251,17 +298,20 @@ export default function GuidedCapture({ onCapture, maxImages = TOTAL_CAPTURES })
       )}
 
       <div className="relative rounded-2xl overflow-hidden bg-slate-900 border border-slate-700">
-        <video
-          ref={videoRef}
-          className={`w-full object-cover ${isActive ? 'block' : 'hidden'}`}
-          style={{ maxHeight: '400px' }}
-          muted playsInline autoPlay
-        />
+        <div className="w-full h-full" style={{ transform: 'scaleX(-1)' }}>
+          <video
+            ref={videoRef}
+            className={`w-full h-full object-contain ${isActive ? 'block' : 'hidden'}`}
+            style={{ maxHeight: '400px', transform: `rotate(${videoRotation}deg)` }}
+            muted playsInline autoPlay
+          />
+        </div>
 
         {isActive && (
           <canvas
             ref={overlayRef}
             className="absolute inset-0 w-full h-full pointer-events-none"
+            style={{ transform: 'scaleX(-1)' }} // Overlay must also be mirrored to match the flipped video container
           />
         )}
         <canvas ref={canvasRef} className="hidden" />

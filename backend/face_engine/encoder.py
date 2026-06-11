@@ -129,17 +129,18 @@ def normalize_face_box(face_box) -> tuple | None:
     if face_box is None:
         return None
     try:
-        if isinstance(face_box, (tuple, list)) and len(face_box) == 4:
-            return tuple(int(v) for v in face_box)  # already (top,right,bottom,left)
         if isinstance(face_box, dict):
             # ArcFace uses absolute pixel coords: {left, top, right, bottom}
-            top    = int(face_box.get('top',    face_box.get('y1', 0)))
-            right  = int(face_box.get('right',  face_box.get('x2', 0)))
-            bottom = int(face_box.get('bottom', face_box.get('y2', 0)))
-            left   = int(face_box.get('left',   face_box.get('x1', 0)))
-            return (top, right, bottom, left)
-    except Exception:
-        pass
+            top    = face_box.get('top',    face_box.get('y1', 0))
+            right  = face_box.get('right',  face_box.get('x2', 0))
+            bottom = face_box.get('bottom', face_box.get('y2', 0))
+            left   = face_box.get('left',   face_box.get('x1', 0))
+            return (int(float(top)), int(float(right)), int(float(bottom)), int(float(left)))
+            
+        if isinstance(face_box, (tuple, list)) and len(face_box) == 4:
+            return tuple(int(float(v)) for v in face_box)  # already (top,right,bottom,left)
+    except Exception as e:
+        logger.error(f"Error in normalize_face_box: {e}")
     return None
 
 
@@ -397,7 +398,7 @@ class FaceEngine:
             narr = np.array(arr)
             # Skip if too similar to an already-cached encoding
             if existing:
-                dists = face_recognition.face_distance(existing, narr)
+                dists = self.compare_encodings(existing, narr)
                 if float(np.min(dists)) < 0.35:   # very tight threshold for cache dedup
                     continue
             if len(existing) < self.MAX_ENCODINGS_PER_USER:
@@ -554,11 +555,31 @@ class FaceEngine:
                     'face_box': locations[0],
                 }
 
-        # ── Step 6: Encode ────────────────────────────────────────────────────
+        # ── Step 6: Encode & Landmarks ────────────────────────────────────────
         try:
             encodings = face_recognition.face_encodings(
                 processed, [locations[0]], num_jitters=num_jitters
             )
+            # Get landmarks for pose/smile
+            landmarks = face_recognition.face_landmarks(processed, [locations[0]])
+            
+            # Map dlib landmarks to our 5-point kpss format:
+            # 0: left eye, 1: right eye, 2: nose, 3: left mouth, 4: right mouth
+            kpss = []
+            if landmarks:
+                m = landmarks[0]
+                # Helper to get center of a list of points
+                def center(pts):
+                    return {"x": float(np.mean([p[0] for p in pts])), "y": float(np.mean([p[1] for p in pts]))}
+                
+                kpss = [
+                    center(m.get('left_eye', [])),
+                    center(m.get('right_eye', [])),
+                    center(m.get('nose_bridge', [])[-1:]), # tip of nose
+                    center(m.get('top_lip', [])[:1]),     # left corner
+                    center(m.get('top_lip', [])[6:7]),    # right corner
+                ]
+
         except Exception as e:
             return {
                 'success': False,
@@ -582,6 +603,7 @@ class FaceEngine:
             'face_count':    1,
             'quality_score': round(quality_score, 3),
             'face_box':      locations[0],
+            'kpss':          kpss,
         }
 
     def encode_face(self, image_rgb: np.ndarray, model: str = 'hog') -> list:
@@ -603,6 +625,7 @@ class FaceEngine:
         model: str = 'hog',
         include_embeddings: bool = False,
         image_rgb=None,
+        scanner_id: str = 'default',
     ) -> list:
         """
         Recognize all faces in image_data.

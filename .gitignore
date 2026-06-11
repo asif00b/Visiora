@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+backend/venv/
+
+# Node/Vite
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Runtime data and local secrets
+.env
+.env.*
+!.env.example
+backend/database.db
+backend/logs/
+*.log
+storage/known_faces/*
+storage/unknown_faces/*
+!storage/known_faces/.gitkeep
+!storage/unknown_faces/.gitkeep
+
+# Local binaries and model artifacts
+*.dll
+*.whl
+*.onnx
+*.dat
+*.zip

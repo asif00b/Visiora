@@ -24,7 +24,7 @@ class SessionModel(db.Model):
     is_active  = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # Relationship — lazy='select' avoids backref conflicts with MySQL
+    # Relationship - keep lazy loading predictable for existing routes.
     attendances = db.relationship(
         'Attendance',
         backref='session',

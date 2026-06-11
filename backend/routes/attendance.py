@@ -64,7 +64,7 @@ def attendance_report():
     — never raises an unhandled exception.
     """
     try:
-        q = Attendance.query.join(User)
+        q = Attendance.query.join(User, Attendance.user_id == User.id)
 
         user_id    = request.args.get('user_id',    type=int)
         session_id = request.args.get('session_id', type=int)
@@ -152,7 +152,7 @@ def user_attendance(uid):
 def export_csv():
     """Export filtered attendance as CSV."""
     try:
-        q = Attendance.query.join(User)
+        q = Attendance.query.join(User, Attendance.user_id == User.id)
 
         user_id    = request.args.get('user_id',    type=int)
         session_id = request.args.get('session_id', type=int)
