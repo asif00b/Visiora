@@ -40,8 +40,8 @@ export default function Login() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 mb-4">
             <Camera size={28} className="text-indigo-400" />
           </div>
-          <h1 className="text-3xl font-bold text-gradient">FaceAttend</h1>
-          <p className="text-slate-500 mt-1 text-sm">AI-Powered Attendance System</p>
+          <h1 className="text-3xl font-bold text-gradient">Visiora</h1>
+          <p className="text-slate-500 mt-1 text-sm">Recognize. Verify. Record.</p>
         </div>
 
         {/* Card */}
@@ -112,7 +112,7 @@ export default function Login() {
           </form>
 
           <div className="mt-6 pt-4 border-t border-slate-700/50 text-center">
-            <p className="text-xs text-slate-600">© {new Date().getFullYear()} FaceAttend · AI-Powered Attendance</p>
+            <p className="text-xs text-slate-600">© {new Date().getFullYear()} Visiora — Face Recognition Attendance System</p>
           </div>
         </div>
       </div>

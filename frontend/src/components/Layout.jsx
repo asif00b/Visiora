@@ -36,7 +36,7 @@ export default function Layout() {
           >
             <Menu size={20} />
           </button>
-          <span className="text-gradient font-bold text-lg">FaceAttend</span>
+          <span className="text-gradient font-bold text-lg">Visiora</span>
         </header>
 
         {/* Page content */}

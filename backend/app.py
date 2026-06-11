@@ -1,5 +1,5 @@
 """
-Face Recognition Attendance System — Backend
+Visiora — Backend
 Flask Application Entry Point
 """
 
@@ -55,7 +55,7 @@ def create_app():
     setup_logging(log_dir)
 
     logger = logging.getLogger(__name__)
-    logger.info('Starting Face Recognition Attendance System v6.0.0')
+    logger.info('Starting Visiora — Face Recognition Attendance System v6.0.0')
 
     app = Flask(__name__)
     app.config.from_object(Config)
@@ -141,7 +141,7 @@ def create_app():
 if __name__ == '__main__':
     app = create_app()
     print('\n' + '=' * 55)
-    print('  FaceAttend — AI Attendance System · Backend v6.1')
+    print('  Visiora — Face Recognition Attendance System · Backend v6.1')
     print('  Running on http://localhost:5000')
     print('=' * 55 + '\n')
     app.run(host='0.0.0.0', port=5000, debug=True)

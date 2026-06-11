@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 
-title Face Recognition Attendance System - Running
+title Visiora - Running
 color 0B
 
 if "%DATABASE_URL%"=="" set "DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/attendance_db"
@@ -11,7 +11,7 @@ if "%TRACKER_ALGORITHM%"=="" set "TRACKER_ALGORITHM=KCF"
 
 echo.
 echo ============================================================
-echo   Face Recognition Attendance System
+echo   Visiora — Face Recognition Attendance System
 echo   PostgreSQL + pgvector + InsightFace
 echo ============================================================
 echo.

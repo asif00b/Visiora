@@ -43,8 +43,8 @@ export default function Sidebar({ onClose }) {
       {/* Logo */}
       <div className="flex items-center justify-between px-5 py-5 border-b border-slate-800">
         <div>
-          <span className="text-gradient font-bold text-xl tracking-tight">FaceAttend</span>
-          <p className="text-xs text-slate-500 mt-0.5">AI Attendance System</p>
+          <span className="text-gradient font-bold text-xl tracking-tight">Visiora</span>
+          <p className="text-xs text-slate-500 mt-0.5">Recognize. Verify. Record.</p>
         </div>
         <button onClick={close} className="lg:hidden btn-icon">
           <X size={18} />

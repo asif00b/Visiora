@@ -1,4 +1,4 @@
-# Face Recognition Attendance System - Version 6
+# Visiora — Face Recognition Attendance System (v6)
 
 Production-style lightweight attendance system for a laptop-class setup.
 
