@@ -7,7 +7,6 @@ sqlalchemy>=2.0.0
 
 # Auth & Security
 bcrypt>=4.0.0
-cryptography>=41.0.0
 
 # MySQL driver (pure Python — no C compiler needed)
 PyMySQL>=1.1.0
@@ -18,13 +17,6 @@ opencv-python-headless>=4.8.0
 
 # Numerics
 numpy>=1.24.0,<2.0.0
-scipy>=1.11.0
 
 # Image processing
 Pillow>=10.0.0
-
-# Data
-pandas>=2.0.0
-
-# Utils
-python-dotenv>=1.0.0

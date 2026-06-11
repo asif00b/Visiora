@@ -1,33 +1,51 @@
 import { useEffect, useState } from 'react'
-import { getConfig, updateConfig, reloadCache, getSystemInfo } from '../../api/admin'
+import {
+  getConfig, updateConfig, reloadCache, getSystemInfo,
+  getStorageInfo, cleanupStorage, compressStorage, cleanupUnknown
+} from '../../api/admin'
 import { ToastContainer, useToast } from '../../components/Toast'
-import { Settings, Save, RefreshCw, CheckCircle, XCircle, Info } from 'lucide-react'
+import {
+  Settings, Save, RefreshCw, CheckCircle, XCircle, Info,
+  HardDrive, Zap, Trash2, Archive, Cpu
+} from 'lucide-react'
 
 const CONFIG_META = [
-  { key: 'liveness_enabled', label: 'Liveness Detection', type: 'bool', desc: 'Require blink challenge during face registration' },
-  { key: 'liveness_blink_count', label: 'Required Blinks', type: 'number', desc: 'How many blinks required to pass liveness check', min: 1, max: 5 },
-  { key: 'recognition_tolerance', label: 'Recognition Tolerance', type: 'float', desc: 'Lower = stricter (0.4–0.65 recommended)', min: 0.3, max: 0.8, step: 0.01 },
-  { key: 'attendance_cooldown_minutes', label: 'Attendance Cooldown (minutes)', type: 'number', desc: 'Minimum time between attendance marks for same user', min: 0 },
-  { key: 'scanner_interval_ms', label: 'Scanner Interval (ms)', type: 'number', desc: 'How often to send frames for recognition (lower = faster, more CPU)', min: 300, max: 5000 },
-  { key: 'scanner_camera_index', label: 'Camera Device Index', type: 'number', desc: 'Default camera device index (0 = first webcam)', min: 0, max: 5 },
-  { key: 'save_unknown_faces', label: 'Save Unknown Faces', type: 'bool', desc: 'Capture and store snapshots of unrecognized faces' },
-  { key: 'face_detection_model', label: 'Detection Model', type: 'select', options: ['hog', 'cnn'], desc: 'HOG = faster, CNN = more accurate (requires GPU)' },
+  { key: 'liveness_enabled',            label: 'Liveness Detection',           type: 'bool',   desc: 'Require blink challenge during face registration' },
+  { key: 'liveness_blink_count',         label: 'Required Blinks',              type: 'number', desc: 'How many blinks required to pass liveness check',       min: 1, max: 5 },
+  { key: 'recognition_tolerance',        label: 'Recognition Tolerance',        type: 'float',  desc: 'Lower = stricter (0.4–0.65 recommended)',               min: 0.3, max: 0.8, step: 0.01 },
+  { key: 'attendance_cooldown_minutes',  label: 'Attendance Cooldown (min)',    type: 'number', desc: 'Minimum time between attendance marks for same user',    min: 0 },
+  { key: 'scanner_interval_ms',          label: 'Scanner Interval (ms)',        type: 'number', desc: 'How often to send frames for recognition (lower = faster)', min: 300, max: 5000 },
+  { key: 'scanner_camera_index',         label: 'Camera Device Index',          type: 'number', desc: 'Default camera device index (0 = first webcam)',         min: 0, max: 5 },
+  { key: 'save_unknown_faces',           label: 'Save Unknown Faces',           type: 'bool',   desc: 'Capture and store snapshots of unrecognized faces' },
+  { key: 'face_detection_model',         label: 'Detection Model',              type: 'select', options: ['hog', 'cnn'], desc: 'HOG = faster, CNN = more accurate (requires GPU)' },
+  { key: 'min_face_size_px',             label: 'Min Face Size (px)',           type: 'number', desc: 'Minimum face bounding-box size to accept',               min: 20, max: 200 },
+  { key: 'unknown_face_dedup_threshold', label: 'Unknown Dedup Threshold',      type: 'float',  desc: 'Similarity threshold to skip duplicate unknowns (0.4–0.7)', min: 0.3, max: 0.9, step: 0.01 },
+  { key: 'unknown_face_max_age_days',    label: 'Unknown Max Age (days)',       type: 'number', desc: 'Auto-delete unknown faces older than this many days',    min: 1, max: 90 },
+  { key: 'unknown_face_max_total',       label: 'Unknown Max Total',            type: 'number', desc: 'Maximum number of unknown faces to store',               min: 10, max: 1000 },
+  { key: 'unknown_face_max_per_cluster', label: 'Unknown Max Per Cluster',      type: 'number', desc: 'Maximum images per same unknown person',                 min: 1, max: 20 },
 ]
 
 export default function AdminConfig() {
   const { toasts, removeToast, toast } = useToast()
-  const [config, setConfig] = useState({})
-  const [sysInfo, setSysInfo] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
+  const [config, setConfig]     = useState({})
+  const [sysInfo, setSysInfo]   = useState(null)
+  const [storageInfo, setStorageInfo] = useState(null)
+  const [loading, setLoading]   = useState(true)
+  const [saving, setSaving]     = useState(false)
   const [reloading, setReloading] = useState(false)
+  const [storageOp, setStorageOp] = useState(null)  // 'cleanup' | 'compress' | 'unknown_cleanup'
 
   const load = async () => {
     setLoading(true)
     try {
-      const [cr, ir] = await Promise.all([getConfig(), getSystemInfo()])
+      const [cr, ir, sr] = await Promise.all([
+        getConfig(),
+        getSystemInfo(),
+        getStorageInfo().catch(() => ({ data: null })),
+      ])
       setConfig(cr.data.config)
       setSysInfo(ir.data.info)
+      setStorageInfo(sr.data)
     } catch { toast.error('Failed to load config') }
     finally { setLoading(false) }
   }
@@ -50,9 +68,23 @@ export default function AdminConfig() {
       toast.success(res.data.message)
     } catch (err) {
       toast.error(err.response?.data?.message || 'Reload failed')
-    } finally {
-      setReloading(false)
-    }
+    } finally { setReloading(false) }
+  }
+
+  const handleStorageOp = async (op) => {
+    setStorageOp(op)
+    try {
+      let res
+      if (op === 'cleanup')         res = await cleanupStorage()
+      else if (op === 'compress')   res = await compressStorage()
+      else if (op === 'unk_cleanup') res = await cleanupUnknown()
+      toast.success(res.data.message || 'Done')
+      // Refresh storage info
+      const sr = await getStorageInfo().catch(() => ({ data: null }))
+      setStorageInfo(sr.data)
+    } catch (err) {
+      toast.error(err.response?.data?.message || `${op} failed`)
+    } finally { setStorageOp(null) }
   }
 
   const setValue = (key, val) => setConfig(c => ({ ...c, [key]: val }))
@@ -67,32 +99,40 @@ export default function AdminConfig() {
     <div className="space-y-6 animate-fade-in max-w-2xl">
       <ToastContainer toasts={toasts} removeToast={removeToast} />
 
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="section-title">System Configuration</h1>
-          <p className="section-subtitle">Configure recognition, attendance and scanner settings</p>
-        </div>
+      <div>
+        <h1 className="section-title">System Configuration</h1>
+        <p className="section-subtitle">Recognition, attendance, scanner and storage settings</p>
       </div>
 
-      {/* System Info */}
+      {/* ── System Status ────────────────────────────────────────────────── */}
       {sysInfo && (
-        <div className="card space-y-3">
+        <div className="card space-y-4">
           <h2 className="font-semibold text-slate-300 flex items-center gap-2"><Info size={15} /> System Status</h2>
           <div className="grid grid-cols-2 gap-3">
             {[
               { label: 'Face Recognition Library', ok: sysInfo.face_recognition_available },
-              { label: 'OpenCV', ok: sysInfo.opencv_available },
+              { label: 'OpenCV',                   ok: sysInfo.opencv_available },
+              { label: 'GPU / CUDA',               ok: sysInfo.gpu_available },
             ].map(item => (
               <div key={item.label} className="flex items-center gap-2 text-sm">
-                {item.ok ? <CheckCircle size={16} className="text-emerald-400" /> : <XCircle size={16} className="text-rose-400" />}
+                {item.ok
+                  ? <CheckCircle size={16} className="text-emerald-400" />
+                  : <XCircle    size={16} className="text-rose-400"    />}
                 <span className={item.ok ? 'text-slate-300' : 'text-slate-500'}>{item.label}</span>
               </div>
             ))}
             <div className="text-sm text-slate-400">
+              <Cpu size={13} className="inline mr-1 text-indigo-400" />
+              Model: <strong className="text-slate-200 uppercase">{sysInfo.recommended_model || 'HOG'}</strong>
+            </div>
+            <div className="text-sm text-slate-400">
               🗄 <strong className="text-slate-200">{sysInfo.cache_size}</strong> encoding(s) cached
             </div>
             <div className="text-sm text-slate-400">
-              👤 <strong className="text-slate-200">{sysInfo.total_users}</strong> users total
+              👤 <strong className="text-slate-200">{sysInfo.total_users}</strong> users
+            </div>
+            <div className="text-sm text-slate-400">
+              ❓ <strong className="text-slate-200">{sysInfo.total_unknown_faces ?? '—'}</strong> unknown faces
             </div>
           </div>
           <button onClick={handleReload} disabled={reloading} className="btn-secondary text-sm">
@@ -102,7 +142,64 @@ export default function AdminConfig() {
         </div>
       )}
 
-      {/* Config fields */}
+      {/* ── Storage Management ────────────────────────────────────────────── */}
+      <div className="card space-y-4">
+        <h2 className="font-semibold text-slate-300 flex items-center gap-2">
+          <HardDrive size={15} /> Storage Management
+        </h2>
+
+        {storageInfo && (
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700">
+              <p className="text-slate-500 text-xs mb-1">Known Faces</p>
+              <p className="text-slate-200 font-semibold">{storageInfo.known_faces?.files ?? 0} files</p>
+              <p className="text-slate-500 text-xs">{storageInfo.known_faces?.mb ?? 0} MB</p>
+            </div>
+            <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700">
+              <p className="text-slate-500 text-xs mb-1">Unknown Faces</p>
+              <p className="text-slate-200 font-semibold">{storageInfo.unknown_faces?.files ?? 0} files</p>
+              <p className="text-slate-500 text-xs">{storageInfo.unknown_faces?.mb ?? 0} MB</p>
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <button
+            id="storage-cleanup-btn"
+            onClick={() => handleStorageOp('cleanup')}
+            disabled={storageOp !== null}
+            className="btn-secondary flex-col items-center py-3 gap-1 h-auto"
+          >
+            <Trash2 size={18} className={storageOp === 'cleanup' ? 'animate-spin' : 'text-rose-400'} />
+            <span className="text-xs font-medium">Cleanup Orphans</span>
+            <span className="text-[10px] text-slate-500">Remove files with no DB record</span>
+          </button>
+
+          <button
+            id="storage-compress-btn"
+            onClick={() => handleStorageOp('compress')}
+            disabled={storageOp !== null}
+            className="btn-secondary flex-col items-center py-3 gap-1 h-auto"
+          >
+            <Archive size={18} className={storageOp === 'compress' ? 'animate-spin' : 'text-amber-400'} />
+            <span className="text-xs font-medium">Compress Images</span>
+            <span className="text-[10px] text-slate-500">Re-save at 85% quality</span>
+          </button>
+
+          <button
+            id="unknown-cleanup-btn"
+            onClick={() => handleStorageOp('unk_cleanup')}
+            disabled={storageOp !== null}
+            className="btn-secondary flex-col items-center py-3 gap-1 h-auto"
+          >
+            <Zap size={18} className={storageOp === 'unk_cleanup' ? 'animate-spin' : 'text-indigo-400'} />
+            <span className="text-xs font-medium">Unknown Cleanup</span>
+            <span className="text-[10px] text-slate-500">Remove stale & duplicates</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ── Settings ──────────────────────────────────────────────────────── */}
       <div className="card space-y-5">
         <h2 className="font-semibold text-slate-300 flex items-center gap-2"><Settings size={15} /> Settings</h2>
         {CONFIG_META.map(meta => (
@@ -120,7 +217,11 @@ export default function AdminConfig() {
                 <span className="text-sm text-slate-400">{config[meta.key] === 'true' ? 'Enabled' : 'Disabled'}</span>
               </div>
             ) : meta.type === 'select' ? (
-              <select value={config[meta.key] || ''} onChange={e => setValue(meta.key, e.target.value)} className="select">
+              <select
+                value={config[meta.key] || ''}
+                onChange={e => setValue(meta.key, e.target.value)}
+                className="select"
+              >
                 {meta.options.map(o => <option key={o} value={o}>{o.toUpperCase()}</option>)}
               </select>
             ) : (

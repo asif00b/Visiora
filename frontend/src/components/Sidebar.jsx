@@ -1,8 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
-  LayoutDashboard, Users, UserPlus, Calendar, Building2,
-  ClipboardList, Camera, Settings, AlertCircle, LogOut, X, ShieldCheck
+  LayoutDashboard, Users, Camera, ClipboardList, Settings, LogOut, X, ShieldCheck
 } from 'lucide-react'
 
 const NavItem = ({ to, icon: Icon, label, onClick }) => (
@@ -52,7 +51,7 @@ export default function Sidebar({ onClose }) {
         </button>
       </div>
 
-      {/* Nav */}
+      {/* Nav — simplified to essential items only */}
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-4">
         <NavSection title="Main">
           <NavItem to="/dashboard" icon={LayoutDashboard} label="Dashboard" onClick={close} />
@@ -61,28 +60,19 @@ export default function Sidebar({ onClose }) {
         {canManage && (
           <NavSection title="People">
             <NavItem to="/students" icon={Users} label="Students" onClick={close} />
-            <NavItem to="/students/register" icon={UserPlus} label="Register Student" onClick={close} />
           </NavSection>
         )}
 
         {canManage && (
           <NavSection title="Attendance">
-            <NavItem to="/scanner" icon={Camera} label="Scanner Portal" onClick={close} />
+            <NavItem to="/scanner" icon={Camera} label="Scanner" onClick={close} />
             <NavItem to="/attendance/report" icon={ClipboardList} label="Reports" onClick={close} />
           </NavSection>
         )}
 
         {isAdmin && (
-          <NavSection title="Management">
-            <NavItem to="/sessions" icon={Calendar} label="Sessions" onClick={close} />
-            <NavItem to="/departments" icon={Building2} label="Departments" onClick={close} />
-          </NavSection>
-        )}
-
-        {isAdmin && (
           <NavSection title="Admin">
-            <NavItem to="/admin/config" icon={Settings} label="System Config" onClick={close} />
-            <NavItem to="/admin/unknown-faces" icon={AlertCircle} label="Unknown Faces" onClick={close} />
+            <NavItem to="/admin/config" icon={Settings} label="Settings" onClick={close} />
           </NavSection>
         )}
       </nav>

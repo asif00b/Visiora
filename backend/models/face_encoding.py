@@ -5,6 +5,10 @@ import json
 
 class FaceEncoding(db.Model):
     __tablename__ = 'face_encodings'
+    __table_args__ = (
+        db.Index('ix_face_encodings_user_id', 'user_id'),
+        db.Index('ix_face_encodings_quality', 'user_id', 'quality_score'),
+    )
 
     id            = db.Column(db.Integer, primary_key=True)
     user_id       = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
@@ -14,6 +18,9 @@ class FaceEncoding(db.Model):
     image_path    = db.Column(db.String(500), nullable=True)
     quality_score = db.Column(db.Float, nullable=True)   # 0–1, higher is better
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
+    # Encoding source info
+    encoding_type = db.Column(db.String(20), default='single', nullable=True)  # 'single' | 'merged'
+    source_count  = db.Column(db.Integer, default=1, nullable=True)  # how many images contributed
 
     def get_encoding(self):
         """Return encoding as a list (ready to convert to numpy)."""
@@ -32,5 +39,7 @@ class FaceEncoding(db.Model):
             'user_id':       self.user_id,
             'image_path':    self.image_path,
             'quality_score': self.quality_score,
+            'encoding_type': self.encoding_type,
+            'source_count':  self.source_count,
             'created_at':    self.created_at.isoformat() if self.created_at else None,
         }

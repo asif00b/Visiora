@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { getDepartments } from '../../api/departments'
 import { createUser } from '../../api/users'
 import { registerFace } from '../../api/face'
-import CameraCapture from '../../components/CameraCapture'
+import GuidedCapture from '../../components/GuidedCapture'
 import { ToastContainer, useToast } from '../../components/Toast'
 import { UserPlus, ChevronRight, ChevronLeft, CheckCircle } from 'lucide-react'
 
@@ -158,7 +158,7 @@ export default function StudentRegister() {
               Capture 5–10 photos for best accuracy. Slightly vary the angle each time.
             </p>
           </div>
-          <CameraCapture onCapture={setCapturedImages} maxImages={10} />
+          <GuidedCapture onCapture={setCapturedImages} maxImages={10} />
           <div className="flex gap-3 pt-2">
             <button onClick={handleSkipFace} className="btn-secondary flex-1">
               Skip (add later)

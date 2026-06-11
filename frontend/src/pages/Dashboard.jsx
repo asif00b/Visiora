@@ -2,12 +2,11 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import StatsCard from '../components/StatsCard'
-import { ToastContainer, useToast } from '../components/Toast'
 import { getStats } from '../api/attendance'
 import { getSystemInfo } from '../api/admin'
 import {
   Users, CalendarCheck, Database, Camera,
-  TrendingUp, Clock, Shield, AlertTriangle
+  TrendingUp, Clock, Shield
 } from 'lucide-react'
 import {
   Chart as ChartJS, CategoryScale, LinearScale,
@@ -20,8 +19,7 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 export default function Dashboard() {
   const { user, isAdmin, canManage } = useAuth()
   const navigate = useNavigate()
-  const { toasts, removeToast } = useToast()
-  const [stats, setStats] = useState(null)
+  const [stats, setStats]     = useState(null)
   const [sysInfo, setSysInfo] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -72,8 +70,6 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8 animate-fade-in">
-      <ToastContainer toasts={toasts} removeToast={removeToast} />
-
       {/* Header */}
       <div>
         <h1 className="section-title">
@@ -109,24 +105,9 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatsCard
-                title="Total Students"
-                value={stats?.total_users ?? '—'}
-                icon={Users}
-                color="indigo"
-              />
-              <StatsCard
-                title="Today's Attendance"
-                value={stats?.today_count ?? '—'}
-                icon={CalendarCheck}
-                color="emerald"
-              />
-              <StatsCard
-                title="Total Records"
-                value={stats?.total_records ?? '—'}
-                icon={Database}
-                color="violet"
-              />
+              <StatsCard title="Total Students" value={stats?.total_users ?? '—'} icon={Users} color="indigo" />
+              <StatsCard title="Today's Attendance" value={stats?.today_count ?? '—'} icon={CalendarCheck} color="emerald" />
+              <StatsCard title="Total Records" value={stats?.total_records ?? '—'} icon={Database} color="violet" />
               <StatsCard
                 title="Face Encodings"
                 value={sysInfo?.total_encodings ?? '—'}
@@ -134,20 +115,6 @@ export default function Dashboard() {
                 icon={Camera}
                 color={sysInfo?.face_recognition_available ? 'emerald' : 'rose'}
               />
-            </div>
-          )}
-
-          {/* System alert */}
-          {sysInfo && !sysInfo.face_recognition_available && (
-            <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300">
-              <AlertTriangle size={18} className="flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="font-semibold text-sm">Face Recognition Offline</p>
-                <p className="text-xs text-amber-400 mt-0.5">
-                  The <code className="font-mono">face_recognition</code> library is not installed.
-                  Run <code className="font-mono">setup.bat</code> to install it.
-                </p>
-              </div>
             </div>
           )}
 
@@ -173,7 +140,7 @@ export default function Dashboard() {
             >
               <Camera size={24} className="text-indigo-400 mb-3 group-hover:scale-110 transition-transform" />
               <h3 className="font-bold text-slate-100">Open Scanner</h3>
-              <p className="text-sm text-slate-500 mt-1">Launch real-time face recognition portal</p>
+              <p className="text-sm text-slate-500 mt-1">Launch real-time face recognition</p>
             </button>
             <button
               onClick={() => navigate('/students/register')}

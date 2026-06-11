@@ -24,6 +24,13 @@ class User(db.Model):
                                   backref='user', cascade='all, delete-orphan')
 
     def to_dict(self, include_sensitive=False):
+        # Get the best encoding quality score for this user
+        best_enc = None
+        try:
+            best_enc = max(self.face_encodings, key=lambda e: e.quality_score or 0) if self.face_encodings else None
+        except Exception:
+            pass
+
         data = {
             'id': self.id,
             'name': self.name,
@@ -38,5 +45,9 @@ class User(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'has_face': len(self.face_encodings) > 0,
             'face_count': len(self.face_encodings),
+            'face_quality_score': best_enc.quality_score if best_enc else None,
+            'face_encoding_type': best_enc.encoding_type if best_enc else None,
+            'face_source_count': best_enc.source_count if best_enc else 0,
         }
         return data
+

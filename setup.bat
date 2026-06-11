@@ -70,13 +70,9 @@ python -m pip install --quiet ^
     "flask-sqlalchemy>=3.1.0" ^
     "sqlalchemy>=2.0.0" ^
     "bcrypt>=4.0.0" ^
-    "cryptography>=41.0.0" ^
     "PyMySQL>=1.1.0" ^
     "numpy>=1.24.0,<2.0.0" ^
-    "scipy>=1.11.0" ^
     "Pillow>=10.0.0" ^
-    "pandas>=2.0.0" ^
-    "python-dotenv>=1.0.0" ^
     "opencv-python-headless>=4.8.0"
 
 if errorlevel 1 (

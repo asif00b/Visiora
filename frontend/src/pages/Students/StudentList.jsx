@@ -4,11 +4,11 @@ import { useAuth } from '../../context/AuthContext'
 import { getUsers, deleteUser } from '../../api/users'
 import ConfirmModal from '../../components/ConfirmModal'
 import { ToastContainer, useToast } from '../../components/Toast'
-import { UserPlus, Search, Trash2, Eye, Camera, Filter } from 'lucide-react'
+import { UserPlus, Search, Trash2, Eye, Camera, AlertTriangle } from 'lucide-react'
 
 const ROLE_COLORS = {
-  admin: 'badge-error',
-  hr: 'badge-warning',
+  admin:   'badge-error',
+  hr:      'badge-warning',
   student: 'badge-info',
 }
 
@@ -16,11 +16,12 @@ export default function StudentList() {
   const navigate = useNavigate()
   const { isAdmin } = useAuth()
   const { toasts, removeToast, toast } = useToast()
-  const [users, setUsers] = useState([])
-  const [filtered, setFiltered] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
+  const [users, setUsers]           = useState([])
+  const [filtered, setFiltered]     = useState([])
+  const [loading, setLoading]       = useState(true)
+  const [search, setSearch]         = useState('')
   const [roleFilter, setRoleFilter] = useState('')
+  const [noFaceOnly, setNoFaceOnly] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
 
   const load = async () => {
@@ -41,11 +42,16 @@ export default function StudentList() {
     let f = users
     if (search) {
       const q = search.toLowerCase()
-      f = f.filter(u => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || (u.student_id || '').toLowerCase().includes(q))
+      f = f.filter(u =>
+        u.name.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
+        (u.student_id || '').toLowerCase().includes(q)
+      )
     }
-    if (roleFilter) f = f.filter(u => u.role === roleFilter)
+    if (roleFilter)  f = f.filter(u => u.role === roleFilter)
+    if (noFaceOnly)  f = f.filter(u => !u.has_face)
     setFiltered(f)
-  }, [users, search, roleFilter])
+  }, [users, search, roleFilter, noFaceOnly])
 
   const handleDelete = async () => {
     try {
@@ -58,6 +64,8 @@ export default function StudentList() {
       setDeleteTarget(null)
     }
   }
+
+  const noFaceCount = users.filter(u => !u.has_face).length
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -74,12 +82,30 @@ export default function StudentList() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="section-title">Users</h1>
-          <p className="section-subtitle">{filtered.length} user{filtered.length !== 1 ? 's' : ''}</p>
+          <p className="section-subtitle">
+            {filtered.length} user{filtered.length !== 1 ? 's' : ''}
+            {noFaceOnly && <span className="ml-1 text-amber-400">· No face filter active</span>}
+          </p>
         </div>
         <button id="add-user-btn" onClick={() => navigate('/students/register')} className="btn-primary">
           <UserPlus size={16} /> Add User
         </button>
       </div>
+
+      {/* Unregistered faces alert */}
+      {noFaceCount > 0 && !noFaceOnly && (
+        <div
+          className="flex items-center gap-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm cursor-pointer hover:bg-amber-500/15 transition-colors"
+          onClick={() => setNoFaceOnly(true)}
+          title="Click to filter"
+        >
+          <AlertTriangle size={16} className="flex-shrink-0" />
+          <span>
+            <strong>{noFaceCount}</strong> user{noFaceCount > 1 ? 's have' : ' has'} no face registered.
+            <span className="ml-1 underline underline-offset-2 opacity-80">Show only these users</span>
+          </span>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
@@ -105,6 +131,17 @@ export default function StudentList() {
           <option value="hr">HR</option>
           <option value="student">Student</option>
         </select>
+
+        {/* No-face toggle */}
+        <button
+          id="no-face-filter-btn"
+          onClick={() => setNoFaceOnly(v => !v)}
+          className={`btn ${noFaceOnly ? 'btn-primary' : 'btn-secondary'} whitespace-nowrap`}
+          title="Show only users without face data"
+        >
+          <Camera size={15} />
+          {noFaceOnly ? 'All Users' : `No Face (${noFaceCount})`}
+        </button>
       </div>
 
       {/* Table */}
@@ -150,9 +187,15 @@ export default function StudentList() {
                   <td className="text-slate-400">{user.dept_name || '—'}</td>
                   <td><span className={ROLE_COLORS[user.role] || 'badge-gray'}>{user.role}</span></td>
                   <td>
-                    {user.has_face
-                      ? <span className="badge-success"><Camera size={10} /> {user.face_count}</span>
-                      : <span className="badge-gray">None</span>}
+                    {user.has_face ? (
+                      <span className="badge badge-success">
+                        <Camera size={10} /> {user.face_count}
+                      </span>
+                    ) : (
+                      <span className="badge badge-warning text-xs">
+                        <AlertTriangle size={10} /> None
+                      </span>
+                    )}
                   </td>
                   <td>
                     <div className="flex gap-1.5">
@@ -164,6 +207,19 @@ export default function StudentList() {
                       >
                         <Eye size={15} />
                       </button>
+
+                      {/* Quick face-register shortcut for unregistered users */}
+                      {!user.has_face && (
+                        <button
+                          id={`register-face-${user.id}`}
+                          onClick={() => navigate(`/students/${user.id}`, { state: { openFaceTab: true } })}
+                          className="btn-icon text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/15"
+                          title="Register face"
+                        >
+                          <Camera size={15} />
+                        </button>
+                      )}
+
                       {isAdmin && (
                         <button
                           id={`delete-user-${user.id}`}
@@ -181,7 +237,7 @@ export default function StudentList() {
               {!filtered.length && (
                 <tr>
                   <td colSpan={7} className="text-center py-12 text-slate-500">
-                    No users found
+                    {noFaceOnly ? 'All users have face data registered ✓' : 'No users found'}
                   </td>
                 </tr>
               )}

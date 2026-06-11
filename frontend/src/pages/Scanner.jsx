@@ -1,246 +1,250 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useCamera } from '../hooks/useCamera'
 import { recognizeFace } from '../api/face'
+import { markAttendance } from '../api/attendance'
 import { getActiveSessions } from '../api/sessions'
-import { getConfig } from '../api/admin'
-import { Camera, CameraOff, Settings, Maximize, X, Zap } from 'lucide-react'
+import { Camera, CameraOff, Zap, UserCheck } from 'lucide-react'
 
 /**
- * Always-ON Scanner Portal
- * - Fullscreen video feed
- * - Draws bounding boxes over detected faces (green=matched, red=unknown)
- * - Marks attendance automatically
- * - Shows toast when attendance is marked
+ * Simplified Scanner Portal
+ *
+ * - Start/Stop button + session dropdown (always visible, no hidden panels)
+ * - Green bounding boxes with names
+ * - Toast when attendance is marked
+ * - Frontend dedup: once a user is marked, never sends another mark request
+ *   and shows "✓ Present" on subsequent frames
+ * - Backend also enforces one-per-day as a safety net
  */
 
 export default function Scanner() {
-  const { videoRef, canvasRef, isActive, error, devices, startCamera, stopCamera, captureFrame } = useCamera()
-  const overlayRef = useRef(null)
+  const { videoRef, canvasRef, isActive, error, startCamera, stopCamera, captureFrame } = useCamera()
+  const overlayRef  = useRef(null)
   const intervalRef = useRef(null)
+  const inFlightRef = useRef(false)
+  const scannerIdRef = useRef(`scanner-${Date.now()}-${Math.random().toString(36).slice(2)}`)
 
-  const [sessions, setSessions] = useState([])
+  // Set of user IDs already marked in this scanning session — prevents duplicate API calls
+  const markedRef = useRef(new Set())
+
+  const [sessions, setSessions]               = useState([])
   const [selectedSession, setSelectedSession] = useState('')
-  const [scanning, setScanning] = useState(false)
-  const [config, setConfig] = useState({ scanner_interval_ms: '800', recognition_tolerance: '0.55' })
-  const [notifications, setNotifications] = useState([])  // [{id, name, color, ts}]
-  const [scanResult, setScanResult] = useState([])        // latest faces
-  const [selectedDevice, setSelectedDevice] = useState('')
-  const [stats, setStats] = useState({ total: 0, marked: 0, unknown: 0 })
-  const [showSettings, setShowSettings] = useState(false)
-  const [fullscreen, setFullscreen] = useState(false)
+  const [scanning, setScanning]               = useState(false)
+  const [notifications, setNotifications]     = useState([])
+  const [markedCount, setMarkedCount]         = useState(0)
 
   useEffect(() => {
-    Promise.all([
-      getActiveSessions().catch(() => ({ data: { sessions: [] } })),
-      getConfig().catch(() => ({ data: { config: {} } })),
-    ]).then(([sr, cr]) => {
-      setSessions(sr.data.sessions)
-      setConfig(prev => ({ ...prev, ...cr.data.config }))
-    })
+    getActiveSessions()
+      .then(r => setSessions(r.data.sessions))
+      .catch(() => {})
   }, [])
 
+  // ── Draw face boxes ─────────────────────────────────────────────────────
   const drawBoxes = useCallback((faces) => {
-    const video = videoRef.current
+    const video  = videoRef.current
     const canvas = overlayRef.current
     if (!canvas || !video) return
 
-    canvas.width = video.clientWidth
+    canvas.width  = video.clientWidth
     canvas.height = video.clientHeight
     const ctx = canvas.getContext('2d')
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
     faces.forEach(face => {
-      const { box, name, matched, attendance_marked } = face
+      const { box, name, matched, confidence } = face
       if (!box) return
 
-      const x = box.left * canvas.width
-      const y = box.top * canvas.height
-      const w = (box.right - box.left) * canvas.width
-      const h = (box.bottom - box.top) * canvas.height
+      const x = (box.left ?? 0) * canvas.width
+      const y = (box.top  ?? 0) * canvas.height
+      const w = ((box.right ?? 0) - (box.left ?? 0)) * canvas.width
+      const h = ((box.bottom ?? 0) - (box.top ?? 0)) * canvas.height
 
-      // Box
-      ctx.strokeStyle = matched ? '#10b981' : '#f43f5e'
-      ctx.lineWidth = 2.5
+      // Was this user already marked today?
+      const alreadyMarked = matched && markedRef.current.has(face.user_id)
+      const justMarked    = face.attendance_marked
+
+      // Box color
+      const green  = matched
+      ctx.strokeStyle = green ? '#10b981' : '#f43f5e'
+      ctx.lineWidth   = 2.5
       ctx.strokeRect(x, y, w, h)
 
       // Corner accents
-      const cs = 16
-      ctx.lineWidth = 3.5
+      const cs = 14
+      ctx.lineWidth = 3
       ;[[x, y], [x + w - cs, y], [x, y + h - cs], [x + w - cs, y + h - cs]].forEach(([cx, cy], i) => {
         ctx.beginPath()
-        if (i === 0) { ctx.moveTo(cx, cy + cs); ctx.lineTo(cx, cy); ctx.lineTo(cx + cs, cy) }
+        if (i === 0)      { ctx.moveTo(cx, cy + cs); ctx.lineTo(cx, cy); ctx.lineTo(cx + cs, cy) }
         else if (i === 1) { ctx.moveTo(cx, cy); ctx.lineTo(cx + cs, cy); ctx.lineTo(cx + cs, cy + cs) }
         else if (i === 2) { ctx.moveTo(cx, cy); ctx.lineTo(cx, cy + cs); ctx.lineTo(cx + cs, cy + cs) }
-        else { ctx.moveTo(cx, cy + cs); ctx.lineTo(cx + cs, cy + cs); ctx.lineTo(cx + cs, cy) }
+        else              { ctx.moveTo(cx, cy + cs); ctx.lineTo(cx + cs, cy + cs); ctx.lineTo(cx + cs, cy) }
         ctx.stroke()
       })
 
-      // Label background
-      const label = matched ? name : '? Unknown'
-      const subLabel = attendance_marked ? '✓ Marked' : ''
-      ctx.font = 'bold 13px Inter, sans-serif'
-      const tw = Math.max(ctx.measureText(label).width, ctx.measureText(subLabel).width) + 16
-      const lh = subLabel ? 44 : 26
+      // Label
+      const label = matched ? name : 'Unknown'
+      const sub   = justMarked ? '✓ Marked'
+                  : alreadyMarked ? '✓ Present'
+                  : matched ? `${confidence?.toFixed(0)}%`
+                  : ''
+      ctx.font   = 'bold 13px Inter, sans-serif'
+      const tw   = Math.max(ctx.measureText(label).width, ctx.measureText(sub).width) + 16
+      const lh   = sub ? 42 : 24
 
-      ctx.fillStyle = matched ? 'rgba(5, 150, 105, 0.85)' : 'rgba(220, 38, 38, 0.85)'
+      ctx.fillStyle = green ? 'rgba(5,150,105,0.85)' : 'rgba(220,38,38,0.85)'
       ctx.beginPath()
       ctx.roundRect(x, y - lh - 4, tw, lh, 6)
       ctx.fill()
 
       ctx.fillStyle = '#fff'
-      ctx.fillText(label, x + 8, y - lh + 16)
-      if (subLabel) ctx.fillText(subLabel, x + 8, y - lh + 34)
+      ctx.fillText(label, x + 8, y - lh + 15)
+      if (sub) {
+        ctx.font = '12px Inter, sans-serif'
+        ctx.fillText(sub, x + 8, y - lh + 32)
+      }
     })
   }, [videoRef])
 
+  // ── Scan one frame ──────────────────────────────────────────────────────
   const doScan = useCallback(async () => {
-    if (!isActive) return
-    const frame = captureFrame(0.75)
+    if (!isActive || inFlightRef.current) return
+    const frame = captureFrame(0.70)
     if (!frame) return
 
+    inFlightRef.current = true
     try {
-      const res = await recognizeFace(frame, selectedSession || null, true)
+      // Only request mark_attendance for faces NOT already marked on frontend
+      const res   = await recognizeFace(frame, selectedSession || null, false, scannerIdRef.current)
       const faces = res.data.faces || []
-      setScanResult(faces)
-      drawBoxes(faces)
 
-      // Update stats
-      setStats(prev => ({
-        total: prev.total + faces.length,
-        marked: prev.marked + faces.filter(f => f.attendance_marked).length,
-        unknown: prev.unknown + faces.filter(f => !f.matched).length,
-      }))
+      // Process results — track who was just marked
+      const processed = [...faces]
+      for (const f of processed) {
+        if (f.matched && f.recognition_confirmed && !markedRef.current.has(f.user_id)) {
+          try {
+            const markRes = await markAttendance({
+              user_id: f.user_id,
+              session_id: selectedSession || null,
+              status: 'present',
+            })
+            f.attendance_marked = !!markRes.data.marked
+            f.attendance_status = markRes.data.reason
+            if (markRes.data.marked || ['already_marked_today', 'cooldown'].includes(markRes.data.reason)) {
+              markedRef.current.add(f.user_id)
+            }
+          } catch {
+            f.attendance_status = 'mark_failed'
+          }
+        } else if (f.matched && markedRef.current.has(f.user_id)) {
+          f.attendance_status = 'already_marked_today'
+        }
 
-      // Notifications  for newly marked
-      faces.filter(f => f.attendance_marked).forEach(f => {
-        const note = { id: Date.now() + Math.random(), name: f.name, color: 'emerald' }
-        setNotifications(n => [note, ...n].slice(0, 5))
-        setTimeout(() => setNotifications(n => n.filter(x => x.id !== note.id)), 4000)
+        if (f.attendance_marked) {
+          // Backend confirmed new mark — add to our dedup set
+          markedRef.current.add(f.user_id)
+        }
+      }
+
+      drawBoxes(processed)
+
+      // Count new marks this session
+      const newMarks = processed.filter(f => f.attendance_marked).length
+      if (newMarks > 0) {
+        setMarkedCount(prev => prev + newMarks)
+      }
+
+      // Show toast for newly marked faces
+      processed.filter(f => f.attendance_marked).forEach(f => {
+        const note = { id: Date.now() + Math.random(), name: f.name }
+        setNotifications(n => [note, ...n].slice(0, 4))
+        setTimeout(() => setNotifications(n => n.filter(x => x.id !== note.id)), 3500)
       })
     } catch {
-      // Silently ignore network errors during scan
+      // Network error — skip this frame
+    } finally {
+      inFlightRef.current = false
     }
   }, [isActive, captureFrame, selectedSession, drawBoxes])
 
-  const startScan = async () => {
-    await startCamera(selectedDevice || null)
-    setStats({ total: 0, marked: 0, unknown: 0 })
+  // ── Start / Stop ────────────────────────────────────────────────────────
+  const handleStart = async () => {
+    scannerIdRef.current = `scanner-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    inFlightRef.current = false
+    markedRef.current = new Set()
+    setMarkedCount(0)
+    setNotifications([])
+    await startCamera()
     setScanning(true)
   }
 
-  const stopScan = () => {
+  const handleStop = () => {
     stopCamera()
     setScanning(false)
     if (overlayRef.current) {
       const ctx = overlayRef.current.getContext('2d')
-      ctx.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height)
+      ctx?.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height)
     }
   }
 
-  // Run scan interval
+  // Scan interval
   useEffect(() => {
     if (scanning && isActive) {
-      const interval = parseInt(config.scanner_interval_ms) || 800
-      intervalRef.current = setInterval(doScan, interval)
+      intervalRef.current = setInterval(doScan, 1000)
     } else {
       clearInterval(intervalRef.current)
     }
     return () => clearInterval(intervalRef.current)
-  }, [scanning, isActive, doScan, config.scanner_interval_ms])
-
-  const toggleFullscreen = () => {
-    const el = document.getElementById('scanner-container')
-    if (!document.fullscreenElement) {
-      el?.requestFullscreen?.()
-      setFullscreen(true)
-    } else {
-      document.exitFullscreen?.()
-      setFullscreen(false)
-    }
-  }
+  }, [scanning, isActive, doScan])
 
   return (
     <div className="space-y-4 animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="section-title">Scanner Portal</h1>
-          <p className="section-subtitle">Real-time face recognition attendance</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={() => setShowSettings(v => !v)} className="btn-secondary">
-            <Settings size={16} /> Settings
-          </button>
-          <button onClick={toggleFullscreen} className="btn-secondary">
-            <Maximize size={16} /> Fullscreen
-          </button>
-        </div>
+      <div>
+        <h1 className="section-title">Scanner</h1>
+        <p className="section-subtitle">Face recognition attendance</p>
       </div>
 
-      {/* Settings panel */}
-      {showSettings && (
-        <div className="card space-y-3">
-          <h2 className="font-semibold text-slate-300 flex items-center gap-2"><Settings size={15} /> Scanner Settings</h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <div>
-              <label className="label">Session</label>
-              <select value={selectedSession} onChange={e => setSelectedSession(e.target.value)} className="select" disabled={scanning}>
-                <option value="">No Session (General)</option>
-                {sessions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
-            {devices.length > 1 && (
-              <div>
-                <label className="label">Camera</label>
-                <select value={selectedDevice} onChange={e => setSelectedDevice(e.target.value)} className="select" disabled={scanning}>
-                  <option value="">Default</option>
-                  {devices.map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${i + 1}`}</option>)}
-                </select>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Session selector + Start/Stop — always visible, no hidden panel */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        <select
+          value={selectedSession}
+          onChange={e => setSelectedSession(e.target.value)}
+          className="select flex-1 sm:max-w-xs"
+          disabled={scanning}
+        >
+          <option value="">No Session (General)</option>
+          {sessions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
 
-      {/* Stats bar */}
-      {scanning && (
-        <div className="flex gap-4">
-          <div className="card-glass py-2.5 px-4 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs text-slate-400">Scans: <strong className="text-slate-200">{stats.total}</strong></span>
-          </div>
-          <div className="card-glass py-2.5 px-4 text-xs text-slate-400">
-            Marked: <strong className="text-emerald-400">{stats.marked}</strong>
-          </div>
-          <div className="card-glass py-2.5 px-4 text-xs text-slate-400">
-            Unknown: <strong className="text-rose-400">{stats.unknown}</strong>
-          </div>
-        </div>
-      )}
+        {!scanning ? (
+          <button id="start-scanner-btn" onClick={handleStart}
+                  className="btn-primary py-3 px-6 text-base gap-2">
+            <Camera size={20} /> Start Scanner
+          </button>
+        ) : (
+          <button id="stop-scanner-btn" onClick={handleStop}
+                  className="btn-danger py-3 px-6 text-base gap-2">
+            <CameraOff size={20} /> Stop Scanner
+          </button>
+        )}
 
-      {/* Scanner window */}
-      <div
-        id="scanner-container"
-        className="relative rounded-2xl overflow-hidden border border-slate-700 bg-black"
-        style={{ minHeight: '400px' }}
-      >
-        <video
-          ref={videoRef}
-          className="w-full object-cover"
-          style={{ maxHeight: '70vh' }}
-          muted
-          playsInline
-          autoPlay
-        />
+        {scanning && (
+          <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+            <UserCheck size={16} className="text-emerald-400" />
+            <span className="text-sm text-emerald-300 font-semibold">{markedCount} marked</span>
+          </div>
+        )}
+      </div>
 
-        {/* Face box overlay canvas */}
-        <canvas
-          ref={overlayRef}
-          className="absolute inset-0 w-full h-full pointer-events-none"
-          style={{ position: 'absolute', top: 0, left: 0 }}
-        />
+      {/* Scanner video */}
+      <div className="relative rounded-2xl overflow-hidden border border-slate-700 bg-black"
+           style={{ minHeight: '400px' }}>
 
-        {/* Hidden capture canvas */}
+        <video ref={videoRef} className="w-full object-cover" style={{ maxHeight: '70vh' }}
+               muted playsInline autoPlay />
+
+        <canvas ref={overlayRef}
+                className="absolute inset-0 w-full h-full pointer-events-none" />
+
         <canvas ref={canvasRef} className="hidden" />
 
         {/* Offline state */}
@@ -252,7 +256,7 @@ export default function Scanner() {
           </div>
         )}
 
-        {/* Scanning indicator */}
+        {/* LIVE badge */}
         {scanning && (
           <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/60 backdrop-blur-sm rounded-full px-3 py-1.5">
             <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
@@ -260,10 +264,11 @@ export default function Scanner() {
           </div>
         )}
 
-        {/* Attendance notifications */}
+        {/* Attendance toast notifications */}
         <div className="absolute top-4 right-4 flex flex-col gap-2">
           {notifications.map(n => (
-            <div key={n.id} className="flex items-center gap-2 bg-emerald-950/90 border border-emerald-700/50 backdrop-blur-sm text-emerald-300 text-sm font-medium px-3 py-2 rounded-xl animate-slide-up shadow-lg">
+            <div key={n.id}
+                 className="flex items-center gap-2 bg-emerald-950/90 border border-emerald-700/50 backdrop-blur-sm text-emerald-300 text-sm font-medium px-4 py-2.5 rounded-xl shadow-lg animate-slide-up">
               <Zap size={14} className="text-emerald-400" />
               <span>✓ {n.name}</span>
             </div>
@@ -277,36 +282,6 @@ export default function Scanner() {
           </div>
         )}
       </div>
-
-      {/* Controls */}
-      <div className="flex gap-3">
-        {!scanning ? (
-          <button id="start-scanner-btn" onClick={startScan} className="btn-primary gap-3 py-3 px-6 text-base">
-            <Camera size={20} /> Start Scanner
-          </button>
-        ) : (
-          <button id="stop-scanner-btn" onClick={stopScan} className="btn-danger gap-3 py-3 px-6 text-base">
-            <CameraOff size={20} /> Stop Scanner
-          </button>
-        )}
-      </div>
-
-      {/* Real-time face list */}
-      {scanResult.length > 0 && (
-        <div className="card">
-          <h3 className="font-semibold text-slate-300 mb-3 text-sm">Last Scan Result</h3>
-          <div className="flex flex-wrap gap-2">
-            {scanResult.map((f, i) => (
-              <div key={i} className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm border
-                ${f.matched ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-rose-500/10 border-rose-500/30 text-rose-300'}`}>
-                <span>{f.matched ? '✓' : '?'} {f.name}</span>
-                <span className="text-xs opacity-60">{f.confidence?.toFixed(1)}%</span>
-                {f.attendance_marked && <span className="badge-success text-xs">Marked</span>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

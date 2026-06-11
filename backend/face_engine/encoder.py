@@ -1,23 +1,25 @@
 """
-Face Recognition Engine
------------------------
+Face Recognition Engine — v6.1
+--------------------------------
 Singleton with in-memory encoding cache for fast recognition.
 
 Key design decisions:
-  - Registration uses HOG (not CNN) for webcam images — CNN is too resource-heavy
-    and unreliable on compressed browser JPEG frames.
-  - HOG with 2x upsample catches small/angled faces very well.
-  - Image preprocessing (CLAHE + upscale) done before detection.
-  - Blur detection and face-size validation give clear user feedback.
-  - num_jitters=1 for speed; accuracy comes from taking multiple photos.
+  - Registration uses HOG by default (reliable on webcam JPEG frames).
+    CNN is used if GPU is detected (admin-configurable).
+  - Multi-angle merged encoding: takes all valid registration photos,
+    produces a WEIGHTED-AVERAGE encoding (weight = quality_score).
+    This single merged encoding is far more robust than any single photo.
+  - num_jitters=3 for registration (quality), =1 for recognition (speed).
+  - Image preprocessing (CLAHE + upscale) before detection.
+  - Blur detection and face-size validation provide clear user feedback.
+  - Structured logging: every recognition logged with distance + timing.
 """
 
 import os
 import base64
-import json
+import time
 import logging
 from io import BytesIO
-from datetime import datetime
 
 import numpy as np
 
@@ -37,6 +39,24 @@ try:
 except ImportError:
     CV2_AVAILABLE = False
     logger.warning('opencv not installed. Image preprocessing disabled.')
+
+# ── GPU / model detection ─────────────────────────────────────────────────────
+
+def _detect_gpu() -> bool:
+    """Return True if a CUDA-capable GPU is available for dlib/CNN."""
+    try:
+        import dlib
+        return dlib.DLIB_USE_CUDA
+    except Exception:
+        return False
+
+GPU_AVAILABLE = _detect_gpu()
+BEST_MODEL    = 'cnn' if GPU_AVAILABLE else 'hog'
+
+logger.info(
+    f'[FaceEngine] GPU detected: {GPU_AVAILABLE} — '
+    f'default model: {BEST_MODEL.upper()}'
+)
 
 
 # ── Quality helpers ───────────────────────────────────────────────────────────
@@ -60,7 +80,7 @@ def _preprocess_for_detection(image_rgb: np.ndarray) -> np.ndarray:
 
     h, w = image_rgb.shape[:2]
 
-    # Upscale small frames (most webcams @ 640×480 are OK, but boost small ones)
+    # Upscale small frames
     if w < 640:
         scale = 640 / w
         image_rgb = cv2.resize(
@@ -71,8 +91,8 @@ def _preprocess_for_detection(image_rgb: np.ndarray) -> np.ndarray:
     lab = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2LAB)
     l_ch, a_ch, b_ch = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    l_ch = clahe.apply(l_ch)
-    lab = cv2.merge([l_ch, a_ch, b_ch])
+    l_ch  = clahe.apply(l_ch)
+    lab   = cv2.merge([l_ch, a_ch, b_ch])
     return cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
 
 
@@ -92,6 +112,50 @@ def _confidence_label(pct: float) -> str:
     if pct >= 85:  return 'High'
     if pct >= 65:  return 'Medium'
     return 'Low'
+
+
+def normalize_face_box(face_box) -> tuple | None:
+    """
+    Convert a face bounding box from any engine format to a
+    consistent (top, right, bottom, left) tuple.
+
+    Accepts:
+        - tuple/list (top, right, bottom, left)  — dlib / face_recognition
+        - dict {left, top, right, bottom}         — ArcFace / InsightFace
+        - dict {top, right, bottom, left}         — normalised dict
+
+    Returns (top, right, bottom, left) tuple, or None on failure.
+    """
+    if face_box is None:
+        return None
+    try:
+        if isinstance(face_box, (tuple, list)) and len(face_box) == 4:
+            return tuple(int(v) for v in face_box)  # already (top,right,bottom,left)
+        if isinstance(face_box, dict):
+            # ArcFace uses absolute pixel coords: {left, top, right, bottom}
+            top    = int(face_box.get('top',    face_box.get('y1', 0)))
+            right  = int(face_box.get('right',  face_box.get('x2', 0)))
+            bottom = int(face_box.get('bottom', face_box.get('y2', 0)))
+            left   = int(face_box.get('left',   face_box.get('x1', 0)))
+            return (top, right, bottom, left)
+    except Exception:
+        pass
+    return None
+
+
+def _eye_centers(landmarks: dict, width: int, height: int) -> dict:
+    def center(points):
+        if not points:
+            return None
+        arr = np.array(points, dtype=float)
+        return {
+            'x': float(np.mean(arr[:, 0]) / width),
+            'y': float(np.mean(arr[:, 1]) / height),
+        }
+
+    left = center(landmarks.get('left_eye', []))
+    right = center(landmarks.get('right_eye', []))
+    return {'left_eye': left, 'right_eye': right} if left and right else {}
 
 
 # ── Image quality scoring ─────────────────────────────────────────────────────
@@ -122,17 +186,17 @@ def score_image_quality(image_rgb: np.ndarray, face_location: tuple) -> float:
     if bottom <= top or right <= left:
         return 0.0
 
-    gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
+    gray      = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
     face_crop = gray[top:bottom, left:right]
 
     # 1. Sharpness (Laplacian variance) — normalised; ~200+ is sharp for a webcam
     sharpness_raw = float(cv2.Laplacian(face_crop, cv2.CV_64F).var())
-    sharpness = min(1.0, sharpness_raw / 200.0)
+    sharpness     = min(1.0, sharpness_raw / 200.0)
 
     # 2. Face size — ratio of face area to total image area
     face_area  = (bottom - top) * (right - left)
     image_area = h_img * w_img
-    face_size  = min(1.0, (face_area / image_area) * 10.0)  # scale so 10 % = 1.0
+    face_size  = min(1.0, (face_area / image_area) * 10.0)  # scale so 10% = 1.0
 
     # 3. Brightness — mean pixel value in [0, 255], ideal ≈ 100–180
     mean_brightness = float(np.mean(face_crop))
@@ -147,14 +211,49 @@ def select_best_image(candidates: list) -> dict | None:
     """
     Given a list of candidate dicts (each with 'quality_score' key),
     return the one with the highest quality_score, or None if empty.
-
-    Each candidate dict is expected to contain at minimum:
-        {'image_rgb': np.ndarray, 'quality_score': float,
-         'encoding': np.ndarray, 'b64': str, 'face_box': tuple}
     """
     if not candidates:
         return None
     return max(candidates, key=lambda c: c['quality_score'])
+
+
+def merge_encodings(candidates: list) -> np.ndarray | None:
+    """
+    Produce a weighted-average encoding from all valid candidates.
+    Weight = quality_score of each candidate.
+
+    This merged encoding is far more robust than any single photo because
+    it captures multiple angles/lighting conditions in one vector.
+
+    Args:
+        candidates: list of dicts with 'encoding' (np.ndarray) and
+                    'quality_score' (float).
+
+    Returns:
+        numpy array (128-d) or None if no candidates.
+    """
+    if not candidates:
+        return None
+
+    if len(candidates) == 1:
+        return np.array(candidates[0]['encoding'])
+
+    weights   = np.array([max(c['quality_score'], 0.01) for c in candidates])
+    encodings = np.array([c['encoding'] for c in candidates])
+
+    # Weighted average across the 128 dimensions
+    merged = np.average(encodings, axis=0, weights=weights)
+
+    # L2-normalize for consistent distance comparisons
+    norm = np.linalg.norm(merged)
+    if norm > 0:
+        merged = merged / norm
+
+    logger.debug(
+        f'[FaceEngine] Merged {len(candidates)} encodings '
+        f'(weights: {[round(float(w),3) for w in weights]})'
+    )
+    return merged
 
 
 # ── Result container ──────────────────────────────────────────────────────────
@@ -200,13 +299,27 @@ class FaceEngine:
     def available(self):
         return FACE_RECOGNITION_AVAILABLE
 
+    @property
+    def gpu_available(self):
+        return GPU_AVAILABLE
+
+    @property
+    def recommended_model(self):
+        return BEST_MODEL
+
     # ── Cache ─────────────────────────────────────────────────────────────────
+
+    # Maximum encodings stored per user in the recognition cache.
+    # More = better accuracy at different angles, but slightly more memory.
+    MAX_ENCODINGS_PER_USER = 15
 
     def load_from_db(self):
         """
-        Load face encodings from DB into memory.
-        One encoding per user is sufficient for recognition — load the
-        highest-quality one (quality_score DESC, then newest first).
+        Load ALL face encodings from DB into memory (all per-user records).
+
+        Recognition then compares the probe against EVERY stored encoding and
+        takes the closest distance — much more accurate than a single merged
+        encoding because each stored vector captures a different pose/lighting.
         """
         if not FACE_RECOGNITION_AVAILABLE:
             return
@@ -215,51 +328,90 @@ class FaceEngine:
 
         self._cache.clear()
 
-        # Load all active encodings (ordered: best quality first)
+        # SQLAlchemy 2.0+ case() syntax: case(condition, value=...) or case((when, then), ...)
+        from sqlalchemy import case, null
         all_encodings = (
             FaceEncoding.query
             .join(User)
             .filter(User.is_active == True)
             .order_by(
-                FaceEncoding.quality_score.desc().nullslast(),
+                case(
+                    (FaceEncoding.quality_score == None, 1),
+                    else_=0
+                ).asc(),
+                FaceEncoding.quality_score.desc(),
                 FaceEncoding.created_at.desc(),
             )
             .all()
         )
 
-        loaded = 0
+        loaded     = 0
+        user_count = 0
         for enc in all_encodings:
             uid = enc.user_id
-            # Keep only the BEST encoding per user in the recognition cache
-            if uid in self._cache:
+            if uid not in self._cache:
+                self._cache[uid] = {
+                    'name':      enc.user.name if enc.user else f'User {uid}',
+                    'encodings': [],
+                }
+                user_count += 1
+
+            # Honour per-user cap
+            if len(self._cache[uid]['encodings']) >= self.MAX_ENCODINGS_PER_USER:
                 continue
-            self._cache[uid] = {
-                'name':      enc.user.name if enc.user else f'User {uid}',
-                'encodings': [],
-            }
+
             try:
                 arr = np.array(enc.get_encoding())
                 self._cache[uid]['encodings'].append(arr)
                 loaded += 1
             except Exception as e:
-                logger.error(f'Error loading encoding {enc.id}: {e}')
+                logger.error(f'Error loading encoding id={enc.id}: {e}')
 
         logger.info(
-            f'[FaceEngine] Loaded best encoding for {loaded}/{len(self._cache)} users.'
+            f'[FaceEngine] Cache loaded — {loaded} encoding(s) for {user_count} user(s). '
+            f'GPU={GPU_AVAILABLE}, Model={BEST_MODEL.upper()}'
         )
 
     def add_to_cache(self, user_id: int, name: str, encoding_array):
         """
-        Replace (not append) the encoding for this user.
-        We store exactly ONE encoding per user for fast, clean recognition.
+        Set / replace the cache for one user with a single encoding.
+        Called after a fresh registration that wiped old encodings.
         """
         self._cache[user_id] = {
             'name':      name,
             'encodings': [np.array(encoding_array)],
         }
+        logger.debug(f'[FaceEngine] Cache reset for user_id={user_id} ({name})')
+
+    def add_encodings_to_cache(self, user_id: int, name: str, encoding_arrays: list):
+        """
+        APPEND multiple new encodings to an existing user's cache entry.
+        Used after a dataset upload to extend (not replace) the stored vectors.
+        Automatically deduplicates against what is already cached.
+        """
+        if user_id not in self._cache:
+            self._cache[user_id] = {'name': name, 'encodings': []}
+        existing = self._cache[user_id]['encodings']
+        added = 0
+        for arr in encoding_arrays:
+            narr = np.array(arr)
+            # Skip if too similar to an already-cached encoding
+            if existing:
+                dists = face_recognition.face_distance(existing, narr)
+                if float(np.min(dists)) < 0.35:   # very tight threshold for cache dedup
+                    continue
+            if len(existing) < self.MAX_ENCODINGS_PER_USER:
+                existing.append(narr)
+                added += 1
+        logger.debug(
+            f'[FaceEngine] Cache extended for user_id={user_id}: +{added} encoding(s) '
+            f'(total {len(existing)})'
+        )
+        return added
 
     def remove_from_cache(self, user_id: int):
         self._cache.pop(user_id, None)
+        logger.debug(f'[FaceEngine] Cache removed for user_id={user_id}')
 
     def cache_size(self):
         return sum(len(v['encodings']) for v in self._cache.values())
@@ -295,8 +447,9 @@ class FaceEngine:
     def encode_face_for_registration(
         self,
         image_rgb: np.ndarray,
-        model: str = 'hog',      # HOG is fast & reliable for webcam images
-        min_face_size: int = 50, # Smaller minimum for typical webcam distance
+        model: str = 'hog',
+        min_face_size: int = 50,
+        num_jitters: int = 3,    # Higher = better quality encoding
     ) -> dict:
         """
         Encode exactly ONE face for student registration.
@@ -306,7 +459,7 @@ class FaceEngine:
           2. Try HOG with 2x upsample (catches small/angled faces)
           3. If still no face, try HOG with 1x upsample on original
           4. Validate: exactly 1 face, not too small, not too blurry
-          5. Encode with num_jitters=1 (fast; accuracy from multiple photos)
+          5. Encode with num_jitters=3 (better quality for registration)
 
         Returns dict with keys: success, encoding, message, face_count,
                                 quality_score, face_box
@@ -333,7 +486,7 @@ class FaceEngine:
                 image_rgb, model='hog', number_of_times_to_upsample=2
             )
 
-        # Second fallback: try with 1x upsample (sometimes 2x over-detects nothing)
+        # Second fallback: try with 1x upsample
         if not locations:
             locations = face_recognition.face_locations(
                 processed, model='hog', number_of_times_to_upsample=1
@@ -384,9 +537,9 @@ class FaceEngine:
         # ── Step 5: Blur check ────────────────────────────────────────────────
         quality_score = 1.0
         if CV2_AVAILABLE:
-            gray   = cv2.cvtColor(processed, cv2.COLOR_RGB2GRAY)
-            crop   = gray[top:bottom, left:right]
-            blur   = _blur_score(crop)
+            gray          = cv2.cvtColor(processed, cv2.COLOR_RGB2GRAY)
+            crop          = gray[top:bottom, left:right]
+            blur          = _blur_score(crop)
             quality_score = min(1.0, blur / 150.0)
 
             if blur < 20:   # Very blurry (threshold lowered from 30 → 20)
@@ -402,10 +555,9 @@ class FaceEngine:
                 }
 
         # ── Step 6: Encode ────────────────────────────────────────────────────
-        # num_jitters=1 for speed. Multiple photos are better than more jitters.
         try:
             encodings = face_recognition.face_encodings(
-                processed, [locations[0]], num_jitters=1
+                processed, [locations[0]], num_jitters=num_jitters
             )
         except Exception as e:
             return {
@@ -444,7 +596,14 @@ class FaceEngine:
 
     # ── Real-time Recognition ─────────────────────────────────────────────────
 
-    def recognize(self, image_data, tolerance: float = 0.50, model: str = 'hog') -> list:
+    def recognize(
+        self,
+        image_data,
+        tolerance: float = 0.50,
+        model: str = 'hog',
+        include_embeddings: bool = False,
+        image_rgb=None,
+    ) -> list:
         """
         Recognize all faces in image_data.
 
@@ -453,14 +612,17 @@ class FaceEngine:
           2. Resize to 0.25x for fast face detection
           3. Run HOG detection on small frame
           4. Compute encodings on small frame
-          5. Match against in-memory cache (1 encoding per user)
+          5. Match against in-memory cache (1 merged encoding per user)
+
+        Logs every recognition result (distance, match, timing).
 
         Returns list of dicts: user_id, name, box (normalised 0-1), distance, matched.
         """
         if not FACE_RECOGNITION_AVAILABLE:
             return []
 
-        image_rgb = self.decode_image(image_data)
+        t0 = time.monotonic()
+        image_rgb = image_rgb if image_rgb is not None else self.decode_image(image_data)
         if image_rgb is None:
             return []
 
@@ -476,11 +638,15 @@ class FaceEngine:
         if not locations:
             return []
 
-        # num_jitters=1: fast, good enough when cache has quality encodings
+        # num_jitters=1: fast (accuracy comes from stored multi-angle encodings)
         encodings = face_recognition.face_encodings(small, locations, num_jitters=1)
+        landmarks = (
+            face_recognition.face_landmarks(small, locations)
+            if include_embeddings else [{} for _ in locations]
+        )
 
         results = []
-        for enc, loc in zip(encodings, locations):
+        for enc, loc, marks in zip(encodings, locations, landmarks):
             top, right, bottom, left = loc
             box = {
                 'top':    top    / sh,
@@ -489,7 +655,23 @@ class FaceEngine:
                 'left':   left   / sw,
             }
             match_result = self._find_best_match(enc, tolerance)
-            results.append({**match_result, 'box': box})
+
+            # Structured confidence log
+            elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
+            logger.debug(
+                f'[Recognize] matched={match_result["matched"]} '
+                f'user={match_result.get("user_id")} '
+                f'distance={round(match_result["distance"], 4)} '
+                f'model={model} '
+                f'time={elapsed_ms}ms'
+            )
+
+            result = {**match_result, 'box': box}
+            if include_embeddings:
+                result['_embedding'] = enc
+                result['landmarks'] = _eye_centers(marks, sw, sh)
+
+            results.append(result)
 
         return results
 
@@ -517,3 +699,61 @@ class FaceEngine:
             'distance': best_distance if best_distance != float('inf') else 1.0,
             'matched':  matched,
         }
+
+    # ── Unknown face similarity ───────────────────────────────────────────────
+
+    def is_duplicate_unknown(
+        self,
+        new_encoding: np.ndarray,
+        existing_encodings: list,
+        threshold: float = 0.6,
+    ) -> bool:
+        """
+        Check if a new unknown-face encoding is a duplicate of any
+        already-stored unknown face.
+
+        Args:
+            new_encoding:       128-d numpy array of the new face.
+            existing_encodings: list of 128-d numpy arrays to compare against.
+            threshold:          if distance < threshold, consider duplicate.
+
+        Returns:
+            True if a duplicate is found (do NOT save), False if new.
+        """
+        if not FACE_RECOGNITION_AVAILABLE or not existing_encodings:
+            return False
+
+        try:
+            existing_arr = np.array(existing_encodings)
+            distances    = face_recognition.face_distance(existing_arr, new_encoding)
+            min_dist     = float(np.min(distances))
+            is_dup       = min_dist < threshold
+            logger.debug(
+                f'[UnknownDedup] min_distance={round(min_dist, 4)} '
+                f'threshold={threshold} duplicate={is_dup}'
+            )
+            return is_dup
+        except Exception as e:
+            logger.error(f'[UnknownDedup] Error during comparison: {e}')
+            return False
+
+    def compare_encodings(self, known_list: list, probe) -> np.ndarray:
+        """
+        Engine-agnostic comparison: returns Euclidean face distances between
+        each known encoding and the probe.
+
+        Args:
+            known_list: list of numpy arrays (128-d dlib embeddings)
+            probe:      numpy array (128-d)
+
+        Returns:
+            numpy array of distances (0 = identical match)
+        """
+        if not FACE_RECOGNITION_AVAILABLE or not known_list:
+            return np.array([])
+        try:
+            known_arr = np.array([np.array(k) for k in known_list])
+            return face_recognition.face_distance(known_arr, np.array(probe))
+        except Exception as e:
+            logger.error(f'[FaceEngine] compare_encodings error: {e}')
+            return np.array([])
