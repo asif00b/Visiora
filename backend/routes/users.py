@@ -22,7 +22,9 @@ def list_users():
         return jsonify({'success': True, 'users': [current.to_dict()]}), 200
 
     users = User.query.order_by(User.created_at.desc()).all()
-    return jsonify({'success': True, 'users': [u.to_dict() for u in users]}), 200
+    # Hide default admin from user list
+    filtered_users = [u.to_dict() for u in users if u.email != 'admin@system.com']
+    return jsonify({'success': True, 'users': filtered_users}), 200
 
 
 @users_bp.route('/users/<int:uid>', methods=['GET'])
@@ -123,6 +125,9 @@ def delete_user(uid):
         return jsonify({'success': False, 'message': 'Cannot delete yourself'}), 400
 
     user = User.query.get_or_404(uid)
+    if user.email == 'admin@system.com':
+        return jsonify({'success': False, 'message': 'Cannot delete default administrator account'}), 400
+    
     # Remove face cache
     try:
         from face_engine.encoder import FaceEngine
