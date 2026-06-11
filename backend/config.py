@@ -30,9 +30,11 @@ DEFAULT_DATABASE_URL = (
 DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL")
 DATABASE_URL = DATABASE_URL or DEFAULT_DATABASE_URL
 
-# Render provides postgres:// but SQLAlchemy requires postgresql://
+# Render provides postgres:// but SQLAlchemy requires postgresql+psycopg://
 if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
+elif DATABASE_URL.startswith("postgresql://") and not DATABASE_URL.startswith("postgresql+psycopg://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
 
 def _db_backend(uri: str) -> str:
