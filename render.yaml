@@ -35,11 +35,5 @@ services:
         value: "320"
       - key: ARCFACE_FORCE_CPU
         value: "true"            # Render free tier has no GPU
-      - key: STORAGE_DIR
-        value: /opt/render/project/storage
       - key: PYTHON_VERSION
         value: "3.11.9"
-    disk:
-      name: visiora-storage
-      mountPath: /opt/render/project/storage
-      sizeGB: 1
