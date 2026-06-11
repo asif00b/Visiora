@@ -2,7 +2,7 @@
 # Deploy: Connect this repo on render.com and it auto-detects this file
 
 databases:
-  - name: faceattend-db
+  - name: visiora-db
     plan: free
     databaseName: attendance_db
     postgresMajorVersion: 16
@@ -10,7 +10,7 @@ databases:
 
 services:
   - type: web
-    name: faceattend-api
+    name: visiora-api
     runtime: python
     plan: free
     region: singapore           # closest to Bangladesh
@@ -21,7 +21,7 @@ services:
     envVars:
       - key: DATABASE_URL
         fromDatabase:
-          name: faceattend-db
+          name: visiora-db
           property: connectionString
       - key: SECRET_KEY
         generateValue: true
@@ -40,6 +40,6 @@ services:
       - key: PYTHON_VERSION
         value: "3.11.9"
     disk:
-      name: faceattend-storage
+      name: visiora-storage
       mountPath: /opt/render/project/storage
       sizeGB: 1

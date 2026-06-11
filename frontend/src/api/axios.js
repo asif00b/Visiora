@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-// In production, VITE_API_URL points to the Render backend (e.g. https://faceattend-api.onrender.com)
+// In production, VITE_API_URL points to the Render backend (e.g. https://visiora-api.onrender.com)
 // In dev, Vite's proxy handles /api → localhost:5000 so we use '/'
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/',
