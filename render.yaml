@@ -6,6 +6,7 @@ databases:
     plan: free
     databaseName: attendance_db
     postgresMajorVersion: 16
+    region: singapore
     ipAllowList: []  # only internal connections
 
 services:
