@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { Eye, EyeOff, Camera, Lock, Mail } from 'lucide-react'
+import { Eye, EyeOff, Lock, Mail } from 'lucide-react'
 
 export default function Login() {
   const { login } = useAuth()
@@ -122,7 +122,28 @@ export default function Login() {
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 mb-4 shadow-xl shadow-indigo-500/10">
-            <Camera size={28} className="text-indigo-400" />
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-8 h-8 text-indigo-400">
+              {/* Focus Brackets / Tech Border */}
+              <path d="M3 8V5a2 2 0 0 1 2-2h3" className="stroke-indigo-500" strokeWidth="2" />
+              <path d="M16 3h3a2 2 0 0 1 2 2v3" className="stroke-indigo-500" strokeWidth="2" />
+              <path d="M21 16v3a2 2 0 0 1-2 2h-3" className="stroke-indigo-500" strokeWidth="2" />
+              <path d="M8 21H5a2 2 0 0 1-2-2v-3" className="stroke-indigo-500" strokeWidth="2" />
+
+              {/* Shutter Blades forming circular core */}
+              <circle cx="12" cy="12" r="5" stroke="currentColor" strokeWidth="1" className="stroke-indigo-400/40" />
+              <path d="M12 7c2.76 0 5 2.24 5 5" className="stroke-indigo-400" />
+              <path d="M17 12c0 2.76-2.24 5-5 5" className="stroke-indigo-400" />
+              <path d="M12 17c-2.76 0-5-2.24-5-5" className="stroke-indigo-400" />
+              <path d="M7 12c0-2.76 2.24-5 5-5" className="stroke-indigo-400" />
+
+              {/* Abstract overlapping tech face lines */}
+              <path d="M9 11a3 3 0 0 1 6 0" className="stroke-indigo-300" strokeWidth="2" />
+              <path d="M12 11v2" className="stroke-indigo-300" strokeWidth="2" />
+              <path d="M8 17a4 4 0 0 1 8 0" className="stroke-indigo-300" strokeWidth="2" />
+
+              {/* Scanner target line */}
+              <line x1="2" y1="12" x2="22" y2="12" className="stroke-violet-500/60" strokeWidth="1" strokeDasharray="2 2" />
+            </svg>
           </div>
           <h1 className="text-3xl font-black text-gradient tracking-tight">Visiora</h1>
           <p className="text-slate-500 mt-1 text-sm font-medium">Recognize. Verify. Record.</p>
