@@ -57,6 +57,8 @@ class ScannerState:
         self.next_track_id = 0
         self.frame_idx = 0
         self.last_used = time.time()
+        self.track_ear_history = {}
+        self.track_liveness_confirmed = {}
 
     def cleanup_tracker(self, track_id):
         self.trackers.pop(track_id, None)
@@ -65,6 +67,8 @@ class ScannerState:
         self.track_rel_kpss.pop(track_id, None)
         self.track_ema_kpss.pop(track_id, None)
         self.track_cache.pop(track_id, None)
+        self.track_ear_history.pop(track_id, None)
+        self.track_liveness_confirmed.pop(track_id, None)
 
 
 class TrackingPipeline:
@@ -98,22 +102,29 @@ class TrackingPipeline:
         state.last_used = time.time()
         state.frame_idx += 1
 
+        # Fetch liveness configuration
+        try:
+            from models.unknown_face import SystemConfig
+            liveness_enabled = SystemConfig.get('liveness_enabled', 'false').lower() == 'true'
+        except Exception:
+            liveness_enabled = False
+
         current_faces = {}
         is_detection_frame = (
             state.frame_idx % self.DETECTION_INTERVAL == 0
         ) or not state.trackers
 
-        self._update_trackers(state, frame_rgb, w, h, current_faces)
+        self._update_trackers(state, frame_rgb, w, h, current_faces, liveness_enabled)
 
         if is_detection_frame:
             self._detect_new_tracks(state, frame_rgb, detector_func, current_faces)
 
         self._recognize_stable_tracks(state, frame_rgb, recognizer_func)
-        results = self._package_results(state, current_faces, w, h)
+        results = self._package_results(state, current_faces, w, h, liveness_enabled)
         self._cleanup_stale_scanners()
         return results
 
-    def _update_trackers(self, state, frame_rgb, w, h, current_faces):
+    def _update_trackers(self, state, frame_rgb, w, h, current_faces, liveness_enabled=False):
         for track_id, tracker in list(state.trackers.items()):
             ok, box = tracker.update(frame_rgb)
             cache = state.track_cache.setdefault(track_id, {})
@@ -134,6 +145,29 @@ class TrackingPipeline:
                 continue
 
             state.track_bboxes[track_id] = new_box
+
+            # --- EAR Liveness calculation ---
+            try:
+                from face_engine.liveness import get_eye_aspect_ratio_from_image
+                top_b, right_b, bottom_b, left_b = ty, tx2, ty2, tx
+                ear = get_eye_aspect_ratio_from_image(frame_rgb, (top_b, right_b, bottom_b, left_b))
+                if ear is not None:
+                    ear_history = state.track_ear_history.setdefault(track_id, [])
+                    ear_history.append(ear)
+                    if len(ear_history) > 15:
+                        ear_history.pop(0)
+                    
+                    if len(ear_history) >= 5:
+                        ear_var = float(np.var(ear_history))
+                        # Variance threshold: 0.00004
+                        # Static photo/screen has variance near zero (typically < 1e-6)
+                        if ear_var < 0.00004:
+                            state.track_liveness_confirmed[track_id] = False
+                        else:
+                            state.track_liveness_confirmed[track_id] = True
+            except Exception as exc:
+                logger.debug("[Tracker] EAR check failed: %s", exc)
+
             rel_pts = state.track_rel_kpss.get(track_id)
             if rel_pts is None:
                 prev = state.track_kpss.get(track_id)
@@ -258,7 +292,7 @@ class TrackingPipeline:
                 }
             )
 
-    def _package_results(self, state, current_faces, w, h):
+    def _package_results(self, state, current_faces, w, h, liveness_enabled=False):
         results = []
         for tid, (bbox, kps) in current_faces.items():
             cache = state.track_cache.get(tid)
@@ -268,10 +302,15 @@ class TrackingPipeline:
             x1, y1, x2, y2 = bbox
             user_id = cache.get("user_id")
             matched = user_id is not None and user_id != "Unknown"
+            
+            # Restrict recognition confirmation if liveness is required but not confirmed
+            liveness_confirmed = state.track_liveness_confirmed.get(tid, True) if liveness_enabled else True
+            rec_confirmed = cache.get("recognition_confirmed", False) and liveness_confirmed
+
             res = {
                 "box": {"left": x1 / w, "top": y1 / h, "right": x2 / w, "bottom": y2 / h},
                 "matched": matched,
-                "recognition_confirmed": cache.get("recognition_confirmed", False),
+                "recognition_confirmed": rec_confirmed,
                 "user_id": user_id,
                 "name": cache.get("name", "Unknown"),
                 "distance": cache.get("distance", 1.0),
@@ -294,8 +333,15 @@ class TrackingPipeline:
                 elif abs(angle) > 20:
                     status = "FACE_ROTATED"
 
-                status_color = "#eab308" if status == "STABILIZING" else "#10b981"
-                if user_id == "Unknown" and cache.get("age", 0) >= self.STABLE_AGE_REQ:
+                # Liveness overlay status override
+                if liveness_enabled and not liveness_confirmed:
+                    if len(state.track_ear_history.get(tid, [])) >= 5:
+                        status = "SPOOF_DETECTED"
+                    else:
+                        status = "LIVENESS_CHECK"
+
+                status_color = "#eab308" if status in ("STABILIZING", "LIVENESS_CHECK") else "#10b981"
+                if status == "SPOOF_DETECTED" or (user_id == "Unknown" and cache.get("age", 0) >= self.STABLE_AGE_REQ):
                     status_color = "#ef4444"
 
                 res["debug"] = {

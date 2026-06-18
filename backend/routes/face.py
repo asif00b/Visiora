@@ -13,7 +13,7 @@ from models.user import User
 from models.unknown_face import UnknownFace, SystemConfig
 from services.attendance_service import mark_attendance_once
 from services.face_service import recognize_and_validate
-from utils.auth_helpers import require_role
+from utils.auth_helpers import require_role, require_auth, get_current_user
 from face_engine.engine_factory import (
     get_engine, engine_info as _engine_info, reset_engine,
     compare_encodings as _engine_compare,
@@ -45,7 +45,7 @@ def _attendance_cache_key(user_id, session_id):
 
 @face_bp.route('/face/register', methods=['POST'])
 @jwt_required()
-@require_role('admin', 'hr')
+@require_auth
 def register_face():
     """
     Register face encodings for a student/user.
@@ -55,12 +55,6 @@ def register_face():
             "user_id": int,
             "images":  [base64_string, ...]   # 1–10 photos recommended
         }
-
-    Strategy:
-      1. Validate and encode each submitted image individually.
-      2. Select the BEST image for profile display.
-      3. Store individual diverse encodings — more angles = better accuracy.
-      4. Update user profile picture with the best image.
     """
     data    = request.get_json() or {}
     user_id = int(data.get('user_id')) if data.get('user_id') is not None else None
@@ -68,6 +62,10 @@ def register_face():
 
     if not user_id or not images:
         return jsonify({'success': False, 'message': 'user_id and images are required'}), 400
+
+    current = get_current_user()
+    if current.role == 'student' and current.id != user_id:
+        return jsonify({'success': False, 'message': 'Access denied'}), 403
 
     user   = User.query.get_or_404(user_id)
     engine = get_engine()
@@ -112,9 +110,6 @@ def register_face():
                 rejected.append(f'{label}: {result["message"]}')
                 continue
 
-            # BUG FIX #3: normalize face_box before calling score_image_quality
-            # dlib returns (top, right, bottom, left) tuple
-            # ArcFace returns {left, top, right, bottom} dict
             norm_box = normalize_face_box(result.get('face_box'))
             quality  = score_image_quality(image_rgb, norm_box) if norm_box else 0.5
 
@@ -140,6 +135,26 @@ def register_face():
             'details': [],
         }), 400
 
+    # ── Step 1.5: Enforce Liveness Check (EAR Variance) ──
+    liveness_enabled = SystemConfig.get('liveness_enabled', 'false').lower() == 'true'
+    if liveness_enabled and len(candidates) >= 2:
+        from face_engine.liveness import get_eye_aspect_ratio_from_image
+        ears = []
+        for c in candidates:
+            norm_box = normalize_face_box(c['face_box'])
+            ear = get_eye_aspect_ratio_from_image(c['image_rgb'], norm_box)
+            if ear is not None:
+                ears.append(ear)
+        if len(ears) >= 2:
+            ear_var = float(np.var(ears))
+            logger.info(f"[Register] EAR values: {ears}, variance: {ear_var}")
+            if ear_var < 0.0001:  # Threshold for static image (same eyes in all pictures)
+                return jsonify({
+                    'success': False,
+                    'message': 'Liveness check failed: Static photo detected. Please blink or move your face slightly during capture.'
+                }), 400
+
+
     # ── Step 2: Select the best profile image ───────────────────────────────
     best        = select_best_image(candidates)
     avg_quality = round(sum(c['quality_score'] for c in candidates) / len(candidates), 3)
@@ -149,51 +164,96 @@ def register_face():
         f'rejected={len(rejected)} avg_quality={avg_quality} best_idx={best["index"]}'
     )
 
-    # ── Step 3: Clear old encodings (clean re-registration) ─────────────────
-    FaceEncoding.query.filter_by(user_id=user_id).delete()
-    db.session.flush()
+    # Save the best image as profile picture
+    try:
+        from routes.users import _save_profile_image
+        _save_profile_image(user, best['b64'])
+    except Exception as e:
+        logger.error(f'Failed to save best face as profile picture: {e}')
 
-    # ── Step 4: Store ONE DB record per valid image (individual encodings) ───
-    # Diverse encodings stored separately are more accurate than a single merged one.
-    # Dedup: skip any encoding too similar to one already saved.
-    saved_encodings = []
+    # ── Step 3: Implement Quality-based Encoding Selection ──
+    existing_records = FaceEncoding.query.filter_by(user_id=user_id).all()
+    all_items = []
+    
+    # Add existing database records to the pool
+    for r in existing_records:
+        try:
+            enc = r.get_encoding()
+            all_items.append({
+                'quality_score': r.quality_score or 0.5,
+                'encoding': enc,
+                'record': r,
+                'is_new': False
+            })
+        except Exception as r_err:
+            logger.warning(f'Failed to parse existing encoding {r.id}: {r_err}')
+
+    # Add new candidate records to the pool
+    for c in candidates:
+        all_items.append({
+            'quality_score': c['quality_score'],
+            'encoding': c['encoding'],
+            'record': None,
+            'is_new': True
+        })
+
+    # Sort all items by quality score descending
+    all_items.sort(key=lambda x: x['quality_score'], reverse=True)
+
+    # Deduplicate and pick up to MAX_ENCODINGS_PER_USER
+    saved_items = []
     dedup_threshold = 0.40  # dlib Euclidean / ArcFace cosine
 
-    for c in sorted(candidates, key=lambda x: x['quality_score'], reverse=True):
-        # BUG FIX #4/#9: Use engine-agnostic compare_encodings instead of
-        # importing face_recognition directly
-        already = [np.array(e) for e in saved_encodings]
+    for item in all_items:
+        if len(saved_items) >= engine.MAX_ENCODINGS_PER_USER:
+            break
+        # Check similarity against already saved items in this selection
+        already = [np.array(x['encoding']) for x in saved_items]
         if already:
-            dists = _engine_compare(already, c['encoding'])
+            dists = _engine_compare(already, item['encoding'])
             if len(dists) > 0 and float(np.min(dists)) < dedup_threshold:
-                continue   # too similar — skip
+                # Too similar — discard the lower-quality copy
+                continue
+        saved_items.append(item)
 
-        enc_rec = FaceEncoding(user_id=user_id)
-        enc_rec.set_encoding(c['encoding'])
-        enc_rec.quality_score = c['quality_score']
-        enc_rec.encoding_type = 'individual'
-        enc_rec.source_count  = 1
-        db.session.add(enc_rec)
-        saved_encodings.append(c['encoding'])
+    # Deletions: records present in DB but not kept in saved_items
+    kept_record_ids = {x['record'].id for x in saved_items if x['record'] is not None}
+    for r in existing_records:
+        if r.id not in kept_record_ids:
+            db.session.delete(r)
 
-    if user.image_path and os.path.basename(user.image_path) == f'{user_id}.jpg':
-        user.image_path = None
+    # Inserts & Reloads
+    saved_encodings = []
+    for x in saved_items:
+        if x['is_new']:
+            enc_rec = FaceEncoding(user_id=user_id)
+            enc_rec.set_encoding(x['encoding'])
+            enc_rec.quality_score = x['quality_score']
+            enc_rec.encoding_type = 'individual'
+            enc_rec.source_count  = 1
+            db.session.add(enc_rec)
+            saved_encodings.append(x['encoding'])
+        else:
+            saved_encodings.append(x['encoding'])
+
     db.session.commit()
 
     # ── Step 5: Reload this user's cache from all stored encodings ───────────
-    engine.add_to_cache(user_id, user.name, saved_encodings[0])
-    if len(saved_encodings) > 1:
-        engine.add_encodings_to_cache(user_id, user.name,
-                                      [np.array(e) for e in saved_encodings[1:]])
+    engine.remove_from_cache(user_id)
+    if saved_encodings:
+        engine.add_to_cache(user_id, user.name, saved_encodings[0])
+        if len(saved_encodings) > 1:
+            engine.add_encodings_to_cache(user_id, user.name,
+                                          [np.array(e) for e in saved_encodings[1:]])
 
     return jsonify({
         'success': True,
         'message': (
-            f'{len(saved_encodings)} unique encoding(s) stored from '
-            f'{len(candidates)} valid image(s). '
+            f'{len(saved_items)} encoding(s) kept/registered. '
+            f'Added {len([x for x in saved_items if x["is_new"]])} new scan(s). '
             f'{len(rejected)} image(s) skipped.'
         ),
-        'saved':         len(saved_encodings),
+        'saved':         len(saved_items),
         'encoding_type': 'multi-individual',
         'source_count':  len(candidates),
         'errors':        rejected,
@@ -357,9 +417,13 @@ def train_dataset(user_id):
 
 @face_bp.route('/face/encodings/<int:user_id>', methods=['GET'])
 @jwt_required()
-@require_role('admin', 'hr')
+@require_auth
 def get_encodings_info(user_id):
     """Return encoding count, type breakdown, and quality stats for a user."""
+    current = get_current_user()
+    if current.role == 'student' and current.id != user_id:
+        return jsonify({'success': False, 'message': 'Access denied'}), 403
+
     User.query.get_or_404(user_id)
     encs = FaceEncoding.query.filter_by(user_id=user_id).order_by(
         FaceEncoding.quality_score.desc()
@@ -420,9 +484,12 @@ def delete_face_encodings(user_id):
 
 @face_bp.route('/face/status/<int:user_id>', methods=['GET'])
 @jwt_required()
-@require_role('admin', 'hr')
+@require_auth
 def face_status(user_id):
     """Return how many face encodings a user has."""
+    current = get_current_user()
+    if current.role == 'student' and current.id != user_id:
+        return jsonify({'success': False, 'message': 'Access denied'}), 403
     enc   = FaceEncoding.query.filter_by(user_id=user_id).first()
     count = FaceEncoding.query.filter_by(user_id=user_id).count()
     engine = get_engine()

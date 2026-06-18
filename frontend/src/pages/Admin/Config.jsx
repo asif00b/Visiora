@@ -14,15 +14,7 @@ const CONFIG_META = [
   { key: 'liveness_blink_count',         label: 'Required Blinks',              type: 'number', desc: 'How many blinks required to pass liveness check',       min: 1, max: 5 },
   { key: 'recognition_tolerance',        label: 'Recognition Tolerance',        type: 'float',  desc: 'Lower = stricter (0.4–0.65 recommended)',               min: 0.3, max: 0.8, step: 0.01 },
   { key: 'attendance_cooldown_minutes',  label: 'Attendance Cooldown (min)',    type: 'number', desc: 'Minimum time between attendance marks for same user',    min: 0 },
-  { key: 'scanner_interval_ms',          label: 'Scanner Interval (ms)',        type: 'number', desc: 'How often to send frames for recognition (lower = faster)', min: 300, max: 5000 },
-  { key: 'scanner_camera_index',         label: 'Camera Device Index',          type: 'number', desc: 'Default camera device index (0 = first webcam)',         min: 0, max: 5 },
   { key: 'save_unknown_faces',           label: 'Save Unknown Faces',           type: 'bool',   desc: 'Capture and store snapshots of unrecognized faces' },
-  { key: 'face_detection_model',         label: 'Detection Model',              type: 'select', options: ['hog', 'cnn'], desc: 'HOG = faster, CNN = more accurate (requires GPU)' },
-  { key: 'min_face_size_px',             label: 'Min Face Size (px)',           type: 'number', desc: 'Minimum face bounding-box size to accept',               min: 20, max: 200 },
-  { key: 'unknown_face_dedup_threshold', label: 'Unknown Dedup Threshold',      type: 'float',  desc: 'Similarity threshold to skip duplicate unknowns (0.4–0.7)', min: 0.3, max: 0.9, step: 0.01 },
-  { key: 'unknown_face_max_age_days',    label: 'Unknown Max Age (days)',       type: 'number', desc: 'Auto-delete unknown faces older than this many days',    min: 1, max: 90 },
-  { key: 'unknown_face_max_total',       label: 'Unknown Max Total',            type: 'number', desc: 'Maximum number of unknown faces to store',               min: 10, max: 1000 },
-  { key: 'unknown_face_max_per_cluster', label: 'Unknown Max Per Cluster',      type: 'number', desc: 'Maximum images per same unknown person',                 min: 1, max: 20 },
 ]
 
 export default function AdminConfig() {

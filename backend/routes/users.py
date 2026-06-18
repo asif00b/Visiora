@@ -79,16 +79,26 @@ def create_user():
 
 @users_bp.route('/users/<int:uid>', methods=['PUT'])
 @jwt_required()
-@require_role('admin', 'hr')
+@require_auth
 def update_user(uid):
     current = get_current_user()
+    
+    # Students can only update their own profile
+    if current.role == 'student' and current.id != uid:
+        return jsonify({'success': False, 'message': 'Access denied'}), 403
+
     user = User.query.get_or_404(uid)
 
     # HR cannot edit admins
     if current.role == 'hr' and user.role == 'admin':
         return jsonify({'success': False, 'message': 'HR cannot edit admin accounts'}), 403
 
-    data = request.get_json()
+    data = request.get_json() or {}
+
+    # Restrict student updates to only allow safe fields
+    if current.role == 'student':
+        for forbidden in ['email', 'password', 'role', 'student_id', 'is_active', 'dept_id']:
+            data.pop(forbidden, None)
 
     if 'name' in data:
         user.name = data['name']

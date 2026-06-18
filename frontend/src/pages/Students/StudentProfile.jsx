@@ -46,6 +46,9 @@ export default function StudentProfile() {
   const [confirmDeleteFace, setConfirmDeleteFace] = useState(false)
   const [editForm, setEditForm]          = useState({})
   const [imgError, setImgError]          = useState(false)
+  const [imagePreview, setImagePreview]  = useState(null)
+
+  const isOwnProfile = me?.id === Number(id)
 
   useEffect(() => {
     const load = async () => {
@@ -60,6 +63,7 @@ export default function StudentProfile() {
         setAttendance(ar.data.attendance)
         setDepartments(dr.data.departments)
         setImgError(false)
+        setImagePreview(null)
       } catch {
         toast.error('Failed to load profile')
       } finally {
@@ -78,13 +82,32 @@ export default function StudentProfile() {
         phone:      editForm.phone,
         dept_id:    editForm.dept_id,
         student_id: editForm.student_id,
+        image_b64:  editForm.image_b64,
       })
       toast.success('Profile updated')
+      const ur = await getUser(id)
+      setUser(ur.data.user)
+      setImagePreview(null)
     } catch (err) {
       toast.error(err.response?.data?.message || 'Update failed')
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image size must be less than 5MB')
+      return
+    }
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      setImagePreview(reader.result)
+      setEditForm(f => ({ ...f, image_b64: reader.result }))
+    }
+    reader.readAsDataURL(file)
   }
 
   const handleRegisterFace = async () => {
@@ -147,7 +170,13 @@ export default function StudentProfile() {
             className="flex-shrink-0 flex items-center justify-center sm:w-52 bg-gradient-to-br from-slate-800 to-slate-900 p-6"
             style={{ minHeight: '180px' }}
           >
-            {hasValidImage ? (
+            {imagePreview ? (
+              <img
+                src={imagePreview}
+                alt={user.name}
+                className="w-36 h-36 rounded-2xl object-cover border-2 border-indigo-500/40 shadow-xl shadow-indigo-500/10"
+              />
+            ) : hasValidImage ? (
               <img
                 src={`/storage/${user.image_path}`}
                 alt={user.name}
@@ -246,7 +275,13 @@ export default function StudentProfile() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left: Profile photo card */}
           <div className="card flex flex-col items-center gap-4 py-6">
-            {hasValidImage ? (
+            {imagePreview ? (
+              <img
+                src={imagePreview}
+                alt={user.name}
+                className="w-32 h-32 rounded-2xl object-cover border-2 border-indigo-500/40 shadow-lg"
+              />
+            ) : hasValidImage ? (
               <img
                 src={`/storage/${user.image_path}`}
                 alt={user.name}
@@ -262,6 +297,23 @@ export default function StudentProfile() {
               <p className="text-sm font-semibold text-slate-200">{user.name}</p>
               <p className="text-xs text-slate-500 capitalize mt-0.5">{user.role}</p>
             </div>
+            {(canManage || isOwnProfile) && (
+              <div className="mt-1">
+                <input
+                  type="file"
+                  accept="image/*"
+                  id="profile-pic-upload"
+                  className="hidden"
+                  onChange={handleImageChange}
+                />
+                <label
+                  htmlFor="profile-pic-upload"
+                  className="btn-secondary text-xs cursor-pointer py-1.5 px-3 flex items-center gap-1.5"
+                >
+                  <Camera size={12} /> Change Photo
+                </label>
+              </div>
+            )}
             <div className="w-full space-y-2">
               <div className={`flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border
                 ${user.has_face
@@ -290,11 +342,11 @@ export default function StudentProfile() {
                   value={editForm.name || ''}
                   onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
                   className="input"
-                  disabled={!canManage}
+                  disabled={!(canManage || isOwnProfile)}
                 />
               </div>
               <div>
-                <label className="label">Email</label>
+                <label className="label">Email (Username)</label>
                 <input
                   value={editForm.email || ''}
                   onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))}
@@ -317,7 +369,7 @@ export default function StudentProfile() {
                   value={editForm.phone || ''}
                   onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))}
                   className="input"
-                  disabled={!canManage}
+                  disabled={!(canManage || isOwnProfile)}
                 />
               </div>
               <div className="col-span-2">
@@ -333,7 +385,7 @@ export default function StudentProfile() {
                 </select>
               </div>
             </div>
-            {canManage && (
+            {(canManage || isOwnProfile) && (
               <button onClick={handleSave} disabled={saving} className="btn-primary">
                 <Save size={15} /> {saving ? 'Saving...' : 'Save Changes'}
               </button>
@@ -381,7 +433,7 @@ export default function StudentProfile() {
           </div>
 
           {/* Right: AI-Guided Capture */}
-          {canManage ? (
+          {(canManage || isOwnProfile) ? (
             <div className="lg:col-span-2 card space-y-4">
               <div>
                 <h2 className="font-bold text-slate-100 flex items-center gap-2">
@@ -389,7 +441,7 @@ export default function StudentProfile() {
                 </h2>
                 <p className="text-sm text-slate-500 mt-0.5">
                   {user.has_face
-                    ? 'Re-register to replace the current face data with better quality images.'
+                    ? 'Register new face scans to update and expand your model. Best quality old scans will be kept automatically.'
                     : 'Position your face in the oval guide and capture multiple images from different angles for best accuracy.'}
                 </p>
               </div>

@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import StatsCard from '../components/StatsCard'
-import { getStats } from '../api/attendance'
+import { getStats, getUserAttendance } from '../api/attendance'
 import { getSystemInfo } from '../api/admin'
+import { getSessions } from '../api/sessions'
+import AttendanceTable from '../components/AttendanceTable'
 import {
   Users, CalendarCheck, Database, Camera,
   TrendingUp, Clock, Shield
@@ -23,6 +25,18 @@ export default function Dashboard() {
   const [sysInfo, setSysInfo] = useState(null)
   const [loading, setLoading] = useState(true)
 
+  // Student states
+  const [allRecords, setAllRecords]         = useState([])
+  const [sessions, setSessions]             = useState([])
+  const [studentLoading, setStudentLoading] = useState(true)
+  const [preset, setPreset]                 = useState('all')
+  const [filters, setFilters]               = useState({
+    session_id: '',
+    status: '',
+    date_from: '',
+    date_to: '',
+  })
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -33,13 +47,82 @@ export default function Dashboard() {
           ])
           if (sr) setStats(sr.data.stats)
           if (ir) setSysInfo(ir.data.info)
+        } else if (user?.role === 'student') {
+          const [ar, ss] = await Promise.all([
+            getUserAttendance(user.id).catch(() => ({ data: { attendance: [] } })),
+            getSessions().catch(() => ({ data: { sessions: [] } })),
+          ])
+          setAllRecords(ar.data.attendance || [])
+          setSessions(ss.data.sessions || [])
         }
       } finally {
         setLoading(false)
+        setStudentLoading(false)
       }
     }
     load()
-  }, [canManage, isAdmin])
+  }, [canManage, isAdmin, user])
+
+  // Student Statistics Calculations
+  const todayStr = new Date().toDateString()
+  const todayRecord = allRecords.find(r => r.timestamp && new Date(r.timestamp).toDateString() === todayStr)
+  const todayStatus = todayRecord ? todayRecord.status : 'not_marked'
+
+  const startOfWeek = new Date()
+  const day = startOfWeek.getDay()
+  const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1) // Monday
+  startOfWeek.setDate(diff)
+  startOfWeek.setHours(0, 0, 0, 0)
+  const weekCount = allRecords.filter(r => r.timestamp && new Date(r.timestamp) >= startOfWeek && ['present', 'late', 'manual'].includes(r.status)).length
+
+  const startOfMonth = new Date()
+  startOfMonth.setDate(1)
+  startOfMonth.setHours(0, 0, 0, 0)
+  const monthCount = allRecords.filter(r => r.timestamp && new Date(r.timestamp) >= startOfMonth && ['present', 'late', 'manual'].includes(r.status)).length
+
+  const totalAttended = allRecords.filter(r => ['present', 'late', 'manual'].includes(r.status)).length
+  const totalDays = allRecords.length
+  const attendanceRate = totalDays > 0 ? Math.round((totalAttended / totalDays) * 100) : 100
+
+  // Filter student records on frontend
+  const filteredRecords = allRecords.filter(rec => {
+    if (filters.session_id && String(rec.session_id) !== filters.session_id) return false
+    if (filters.status && rec.status !== filters.status) return false
+    if (!rec.timestamp) return false
+
+    const recDate = new Date(rec.timestamp)
+
+    if (preset === 'week') {
+      const oneWeekAgo = new Date()
+      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7)
+      if (recDate < oneWeekAgo) return false
+    } else if (preset === 'month') {
+      const oneMonthAgo = new Date()
+      oneMonthAgo.setDate(oneMonthAgo.getDate() - 30)
+      if (recDate < oneMonthAgo) return false
+    }
+
+    if (filters.date_from) {
+      const fromDate = new Date(filters.date_from)
+      fromDate.setHours(0, 0, 0, 0)
+      if (recDate < fromDate) return false
+    }
+    if (filters.date_to) {
+      const toDate = new Date(filters.date_to)
+      toDate.setHours(23, 59, 59, 999)
+      if (recDate > toDate) return false
+    }
+
+    return true
+  })
+
+  const STATUS_CLASSES = {
+    present: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
+    late: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
+    manual: 'text-sky-400 bg-sky-500/10 border-sky-500/30',
+    absent: 'text-rose-400 bg-rose-500/10 border-rose-500/30',
+    not_marked: 'text-slate-400 bg-slate-500/10 border-slate-500/30',
+  }
 
   const chartData = stats?.trend ? {
     labels: stats.trend.map(d => {
@@ -82,15 +165,163 @@ export default function Dashboard() {
 
       {/* Student view */}
       {user?.role === 'student' && (
-        <div className="card-glass text-center py-12">
-          <div className="w-20 h-20 rounded-full bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center mx-auto mb-4">
-            <Shield size={32} className="text-indigo-400" />
+        <div className="space-y-6">
+          {/* Stats Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="card flex items-center justify-between p-4">
+              <div>
+                <p className="text-xs text-slate-500 font-medium">Today's Status</p>
+                <div className="mt-1">
+                  <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold border capitalize ${STATUS_CLASSES[todayStatus]}`}>
+                    {todayStatus.replace('_', ' ')}
+                  </span>
+                </div>
+              </div>
+              <CalendarCheck size={28} className="text-indigo-400" />
+            </div>
+
+            <div className="card flex items-center justify-between p-4">
+              <div>
+                <p className="text-xs text-slate-500 font-medium">Attended This Week</p>
+                <h3 className="text-xl font-bold text-slate-100 mt-1 tabular-nums">
+                  {weekCount} {weekCount === 1 ? 'day' : 'days'}
+                </h3>
+              </div>
+              <Clock size={28} className="text-emerald-400" />
+            </div>
+
+            <div className="card flex items-center justify-between p-4">
+              <div>
+                <p className="text-xs text-slate-500 font-medium">Attended This Month</p>
+                <h3 className="text-xl font-bold text-slate-100 mt-1 tabular-nums">
+                  {monthCount} {monthCount === 1 ? 'day' : 'days'}
+                </h3>
+              </div>
+              <Database size={28} className="text-violet-400" />
+            </div>
+
+            <div className="card flex items-center justify-between p-4">
+              <div>
+                <p className="text-xs text-slate-500 font-medium">Attendance Rate</p>
+                <h3 className="text-xl font-bold text-slate-100 mt-1 tabular-nums">
+                  {attendanceRate}%
+                </h3>
+              </div>
+              <TrendingUp size={28} className="text-pink-400" />
+            </div>
           </div>
-          <h2 className="text-xl font-bold text-slate-100">Your Profile</h2>
-          <p className="text-slate-500 mt-1 text-sm mb-6">View your profile and attendance history</p>
-          <button onClick={() => navigate(`/students/${user.id}`)} className="btn-primary">
-            View My Profile
-          </button>
+
+          {/* Quick Profile Redirect Action */}
+          <div className="card p-5 flex flex-col sm:flex-row items-center justify-between gap-4 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950/20">
+            <div>
+              <h4 className="font-semibold text-slate-200">Face Scan & Profile Photo</h4>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {user.has_face 
+                  ? `Active. You have ${user.face_count || 0} registered face scan(s) for recognition.` 
+                  : 'Action Required: Register your face scans on the profile page to enable automatic attendance tracking.'}
+              </p>
+            </div>
+            <button
+              onClick={() => navigate(`/students/${user.id}`)}
+              className="btn-primary text-xs py-2 px-4 whitespace-nowrap"
+            >
+              <Camera size={14} className="mr-1" /> View Profile & Face Scan
+            </button>
+          </div>
+
+          {/* Log filtering */}
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-bold text-slate-100">Your Attendance History</h2>
+                <p className="text-xs text-slate-500 mt-0.5">{filteredRecords.length} records shown</p>
+              </div>
+
+              {/* Preset filters */}
+              <div className="flex gap-1 bg-slate-800/80 p-0.5 rounded-lg border border-slate-700/50 w-fit">
+                <button
+                  onClick={() => setPreset('all')}
+                  className={`text-xs px-3 py-1.5 rounded-md font-medium transition-all ${
+                    preset === 'all' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  All Time
+                </button>
+                <button
+                  onClick={() => setPreset('week')}
+                  className={`text-xs px-3 py-1.5 rounded-md font-medium transition-all ${
+                    preset === 'week' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  This Week
+                </button>
+                <button
+                  onClick={() => setPreset('month')}
+                  className={`text-xs px-3 py-1.5 rounded-md font-medium transition-all ${
+                    preset === 'month' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  This Month
+                </button>
+              </div>
+            </div>
+
+            {/* Custom filters panel */}
+            <div className="card grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div>
+                <label className="label">Session</label>
+                <select
+                  value={filters.session_id}
+                  onChange={e => setFilters(f => ({ ...f, session_id: e.target.value }))}
+                  className="select text-xs py-1.5"
+                >
+                  <option value="">All Sessions</option>
+                  {sessions.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="label">Status</label>
+                <select
+                  value={filters.status}
+                  onChange={e => setFilters(f => ({ ...f, status: e.target.value }))}
+                  className="select text-xs py-1.5"
+                >
+                  <option value="">All</option>
+                  <option value="present">Present</option>
+                  <option value="late">Late</option>
+                  <option value="manual">Manual</option>
+                  <option value="absent">Absent</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="label">From Date</label>
+                <input
+                  type="date"
+                  value={filters.date_from}
+                  onChange={e => setFilters(f => ({ ...f, date_from: e.target.value }))}
+                  className="input text-xs py-1.5"
+                />
+              </div>
+
+              <div>
+                <label className="label">To Date</label>
+                <input
+                  type="date"
+                  value={filters.date_to}
+                  onChange={e => setFilters(f => ({ ...f, date_to: e.target.value }))}
+                  className="input text-xs py-1.5"
+                />
+              </div>
+            </div>
+
+            <AttendanceTable records={filteredRecords} loading={studentLoading} />
+          </div>
         </div>
       )}
 

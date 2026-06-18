@@ -131,10 +131,32 @@ def user_attendance(uid):
             return jsonify({'success': False, 'message': 'Access denied'}), 403
 
         User.query.get_or_404(uid)
-        records = (Attendance.query
-                   .filter_by(user_id=uid)
-                   .order_by(Attendance.timestamp.desc())
-                   .limit(200).all())
+        
+        q = Attendance.query.filter_by(user_id=uid)
+
+        session_id = request.args.get('session_id', type=int)
+        date_from  = request.args.get('date_from')
+        date_to    = request.args.get('date_to')
+        status     = request.args.get('status')
+
+        if session_id:
+            q = q.filter(Attendance.session_id == session_id)
+        if status:
+            q = q.filter(Attendance.status == status)
+        if date_from:
+            try:
+                dt = datetime.strptime(date_from, '%Y-%m-%d')
+                q  = q.filter(Attendance.timestamp >= dt)
+            except ValueError:
+                pass
+        if date_to:
+            try:
+                dt = datetime.strptime(date_to, '%Y-%m-%d') + timedelta(days=1)
+                q  = q.filter(Attendance.timestamp < dt)
+            except ValueError:
+                pass
+
+        records = q.order_by(Attendance.timestamp.desc()).limit(1000).all()
 
         return jsonify({
             'success':    True,

@@ -558,7 +558,7 @@ class FaceEngine:
         # ── Step 6: Encode & Landmarks ────────────────────────────────────────
         try:
             encodings = face_recognition.face_encodings(
-                processed, [locations[0]], num_jitters=num_jitters
+                processed, [locations[0]], num_jitters=num_jitters, model='large'
             )
             # Get landmarks for pose/smile
             landmarks = face_recognition.face_landmarks(processed, [locations[0]])
@@ -614,7 +614,7 @@ class FaceEngine:
         locations = face_recognition.face_locations(small, model=model)
         if not locations:
             return []
-        return list(face_recognition.face_encodings(small, locations))
+        return list(face_recognition.face_encodings(small, locations, model='large'))
 
     # ── Real-time Recognition ─────────────────────────────────────────────────
 
@@ -662,7 +662,7 @@ class FaceEngine:
             return []
 
         # num_jitters=1: fast (accuracy comes from stored multi-angle encodings)
-        encodings = face_recognition.face_encodings(small, locations, num_jitters=1)
+        encodings = face_recognition.face_encodings(small, locations, num_jitters=1, model='large')
         landmarks = (
             face_recognition.face_landmarks(small, locations)
             if include_embeddings else [{} for _ in locations]

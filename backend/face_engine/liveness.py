@@ -2,66 +2,63 @@
 Liveness Detection
 ------------------
 Detects blink events using Eye Aspect Ratio (EAR).
-Used during face registration to prevent photo/video spoofing.
+Used to prevent photo/video spoofing.
 
-Requires: dlib shape predictor model
-Download: http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2
-Place decompressed .dat file in: backend/face_engine/
-
-Falls back gracefully if dlib landmarks not available.
+Uses face_recognition's built-in 68-point landmark predictor.
 """
 
-import os
 import logging
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-LANDMARK_MODEL = os.path.join(
-    os.path.dirname(__file__),
-    'shape_predictor_68_face_landmarks.dat'
-)
-
-# Try to load dlib predictor
+# Try to load face_recognition
 try:
-    import dlib
-    if os.path.exists(LANDMARK_MODEL):
-        _detector = dlib.get_frontal_face_detector()
-        _predictor = dlib.shape_predictor(LANDMARK_MODEL)
-        LIVENESS_AVAILABLE = True
-        logger.info('[Liveness] dlib landmark predictor loaded.')
-    else:
-        LIVENESS_AVAILABLE = False
-        logger.warning(
-            '[Liveness] shape_predictor_68_face_landmarks.dat not found. '
-            'Liveness detection disabled. Download from: '
-            'http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2'
-        )
+    import face_recognition
+    LIVENESS_AVAILABLE = True
+    logger.info('[Liveness] face_recognition landmarks loaded.')
 except ImportError:
     LIVENESS_AVAILABLE = False
-    logger.warning('[Liveness] dlib not installed. Liveness detection disabled.')
+    logger.warning('[Liveness] face_recognition not installed. Liveness detection disabled.')
 
-
-# dlib 68-point landmark indices
-LEFT_EYE_IDXS  = list(range(36, 42))
-RIGHT_EYE_IDXS = list(range(42, 48))
 EAR_THRESHOLD  = 0.25   # Below this = eye closed
 CONSEC_FRAMES  = 2       # Frames eye must be closed to count as blink
 
 
 def _eye_aspect_ratio(eye_points) -> float:
     """Compute Eye Aspect Ratio."""
+    if len(eye_points) < 6:
+        return 0.0
     a = np.linalg.norm(eye_points[1] - eye_points[5])
     b = np.linalg.norm(eye_points[2] - eye_points[4])
     c = np.linalg.norm(eye_points[0] - eye_points[3])
     return (a + b) / (2.0 * c + 1e-6)
 
 
-def _landmarks_to_np(shape, dtype='int'):
-    coords = np.zeros((68, 2), dtype=dtype)
-    for i in range(68):
-        coords[i] = (shape.part(i).x, shape.part(i).y)
-    return coords
+def get_eye_aspect_ratio_from_image(image_rgb: np.ndarray, face_location=None) -> float | None:
+    """
+    Calculate the Eye Aspect Ratio (EAR) for a face in an image.
+    Uses face_locations to speed up shape prediction.
+    """
+    if not LIVENESS_AVAILABLE:
+        return None
+    try:
+        locs = [face_location] if face_location is not None else None
+        landmarks_list = face_recognition.face_landmarks(image_rgb, face_locations=locs)
+        if not landmarks_list:
+            return None
+        
+        landmarks = landmarks_list[0]
+        left_eye  = np.array(landmarks.get('left_eye', []))
+        right_eye = np.array(landmarks.get('right_eye', []))
+        
+        if len(left_eye) == 6 and len(right_eye) == 6:
+            left_ear  = _eye_aspect_ratio(left_eye)
+            right_ear = _eye_aspect_ratio(right_eye)
+            return float((left_ear + right_ear) / 2.0)
+    except Exception as e:
+        logger.debug(f"[Liveness] EAR calculation error: {e}")
+    return None
 
 
 class LivenessSession:
@@ -103,51 +100,42 @@ class LivenessSession:
             return result
 
         try:
-            gray = _to_gray(image_rgb)
-            faces = _detector(gray, 0)
+            landmarks_list = face_recognition.face_landmarks(image_rgb)
 
-            if not faces:
+            if not landmarks_list:
                 result['message'] = 'No face detected'
                 return result
 
             # Use first face
-            shape = _predictor(gray, faces[0])
-            coords = _landmarks_to_np(shape)
+            landmarks = landmarks_list[0]
+            left_eye  = np.array(landmarks.get('left_eye', []))
+            right_eye = np.array(landmarks.get('right_eye', []))
 
-            left_eye  = coords[LEFT_EYE_IDXS]
-            right_eye = coords[RIGHT_EYE_IDXS]
+            if len(left_eye) == 6 and len(right_eye) == 6:
+                left_ear  = _eye_aspect_ratio(left_eye)
+                right_ear = _eye_aspect_ratio(right_eye)
+                ear = (left_ear + right_ear) / 2.0
 
-            left_ear  = _eye_aspect_ratio(left_eye)
-            right_ear = _eye_aspect_ratio(right_eye)
-            ear = (left_ear + right_ear) / 2.0
+                if ear < EAR_THRESHOLD:
+                    self._consec_closed += 1
+                else:
+                    if self._consec_closed >= CONSEC_FRAMES:
+                        self.blink_count += 1
+                    self._consec_closed = 0
 
-            if ear < EAR_THRESHOLD:
-                self._consec_closed += 1
+                result['blink_count'] = self.blink_count
+                result['passed'] = self.passed
+                result['ear'] = round(ear, 3)
+                result['message'] = (
+                    f'Blinked {self.blink_count}/{self.required_blinks} times'
+                )
             else:
-                if self._consec_closed >= CONSEC_FRAMES:
-                    self.blink_count += 1
-                self._consec_closed = 0
-
-            result['blink_count'] = self.blink_count
-            result['passed'] = self.passed
-            result['ear'] = round(ear, 3)
-            result['message'] = (
-                f'Blinked {self.blink_count}/{self.required_blinks} times'
-            )
+                result['message'] = 'Could not resolve eye landmarks'
         except Exception as e:
-            logger.error(f'Liveness frame error: {e}')
+            logger.error(f'[Liveness] frame error: {e}')
             result['message'] = f'Error: {e}'
 
         return result
-
-
-def _to_gray(image_rgb: np.ndarray) -> np.ndarray:
-    try:
-        import cv2
-        return cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
-    except ImportError:
-        # Fallback: simple luminance
-        return np.dot(image_rgb[..., :3], [0.2989, 0.5870, 0.1140]).astype(np.uint8)
 
 
 def check_liveness_frame(image_rgb: np.ndarray, session_data: dict, required_blinks: int = 2) -> dict:

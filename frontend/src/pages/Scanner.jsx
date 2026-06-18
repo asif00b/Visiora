@@ -132,7 +132,15 @@ export default function Scanner() {
         ctx.stroke()
       })
 
-      const label = face.recognition_confirmed ? name : (face.debug?.status === 'STABILIZING' || !face.debug ? 'Scanning...' : 'Unknown')
+      const label = face.recognition_confirmed
+        ? name
+        : (face.debug?.status === 'SPOOF_DETECTED'
+          ? 'Spoof Detected'
+          : face.debug?.status === 'LIVENESS_CHECK'
+            ? 'Blink or Move'
+            : face.debug?.status === 'STABILIZING' || !face.debug
+              ? 'Scanning...'
+              : 'Unknown')
       const sub = justMarked ? 'Marked' : alreadyMarked ? 'Present' : matched ? `${Number(confidence || 0).toFixed(0)}%` : ''
       ctx.font = 'bold 13px Inter, sans-serif'
       const textWidth = Math.max(ctx.measureText(label).width, ctx.measureText(sub).width) + 16
