@@ -17,7 +17,7 @@ services:
     region: singapore           # closest to Bangladesh
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 1 --threads 3 --timeout 120
+    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
     healthCheckPath: /api/health
     envVars:
       - key: DATABASE_URL
@@ -38,7 +38,3 @@ services:
         value: "true"            # Render free tier has no GPU
       - key: PYTHON_VERSION
         value: "3.11.9"
-      - key: OMP_NUM_THREADS
-        value: "1"
-      - key: MKL_NUM_THREADS
-        value: "1"
