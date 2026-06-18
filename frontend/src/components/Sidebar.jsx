@@ -60,7 +60,7 @@ export default function Sidebar({ onClose }) {
 
         {canManage && (
           <NavSection title="People">
-            <NavItem to="/students" icon={Users} label="Students" onClick={close} />
+            <NavItem to="/students" icon={Users} label="Users" onClick={close} />
           </NavSection>
         )}
 

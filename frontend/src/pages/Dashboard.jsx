@@ -336,7 +336,7 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatsCard title="Total Students" value={stats?.total_users ?? '—'} icon={Users} color="indigo" />
+              <StatsCard title="Total Users" value={stats?.total_users ?? '—'} icon={Users} color="indigo" />
               <StatsCard title="Today's Attendance" value={stats?.today_count ?? '—'} icon={CalendarCheck} color="emerald" />
               <StatsCard title="Total Records" value={stats?.total_records ?? '—'} icon={Database} color="violet" />
               <StatsCard
@@ -378,8 +378,8 @@ export default function Dashboard() {
               className="card hover:border-emerald-500/40 transition-all duration-300 text-left group"
             >
               <Users size={24} className="text-emerald-400 mb-3 group-hover:scale-110 transition-transform" />
-              <h3 className="font-bold text-slate-100">Register Student</h3>
-              <p className="text-sm text-slate-500 mt-1">Add new student with face capture</p>
+              <h3 className="font-bold text-slate-100">Register User</h3>
+              <p className="text-sm text-slate-500 mt-1">Add new user with face capture</p>
             </button>
             <button
               onClick={() => navigate('/attendance/report')}
