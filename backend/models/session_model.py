@@ -22,7 +22,7 @@ class SessionModel(db.Model):
     cooldown_minutes = db.Column(db.Integer, default=10)
 
     is_active  = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
 
     # Relationship - keep lazy loading predictable for existing routes.
     attendances = db.relationship(

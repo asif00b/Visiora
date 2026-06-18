@@ -214,7 +214,7 @@ def cleanup_unknown_faces():
         deleted_orf = 0
 
         # 1. Stale records
-        cutoff = datetime.utcnow() - timedelta(days=max_age)
+        cutoff = datetime.now() - timedelta(days=max_age)
         stale  = UnknownFace.query.filter(UnknownFace.captured_at < cutoff).all()
         for rec in stale:
             _delete_file_safe(rec.image_path, unk_dir)

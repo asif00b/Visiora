@@ -244,14 +244,14 @@ def attendance_stats():
     """Summary stats for dashboard."""
     try:
         total_users  = User.query.filter_by(is_active=True, role='student').count()
-        today_start  = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start  = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         today_count  = Attendance.query.filter(Attendance.timestamp >= today_start).count()
         total_records = Attendance.query.count()
 
         # Last 7 days trend
         trend = []
         for i in range(6, -1, -1):
-            day       = datetime.utcnow() - timedelta(days=i)
+            day       = datetime.now() - timedelta(days=i)
             day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
             day_end   = day_start + timedelta(days=1)
             count     = Attendance.query.filter(

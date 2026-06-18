@@ -20,7 +20,7 @@ class FaceEncoding(db.Model):
     embedding_vector = db.Column(VectorEmbedding(512), nullable=True)
     image_path = db.Column(db.String(500), nullable=True)
     quality_score = db.Column(db.Float, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
     encoding_type = db.Column(db.String(20), default="single", nullable=True)
     source_count = db.Column(db.Integer, default=1, nullable=True)
 

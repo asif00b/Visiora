@@ -30,7 +30,7 @@ _session_marked_day = None
 
 def _attendance_cache_key(user_id, session_id):
     global _session_marked_day
-    today = datetime.utcnow().date()
+    today = datetime.now().date()
     if _session_marked_day != today:
         _session_marked_cache.clear()
         _session_marked_day = today

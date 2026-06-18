@@ -37,10 +37,10 @@ class Attendance(db.Model):
     attendance_date = db.Column(
         db.Date,
         nullable=False,
-        default=lambda: datetime.utcnow().date(),
+        default=lambda: datetime.now().date(),
         server_default=text("CURRENT_DATE"),
     )
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.now, nullable=False)
     status = db.Column(db.String(20), default="present")
     marked_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     note = db.Column(db.String(300), nullable=True)

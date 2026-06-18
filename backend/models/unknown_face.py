@@ -10,7 +10,7 @@ class UnknownFace(db.Model):
 
     id               = db.Column(db.Integer, primary_key=True)
     image_path       = db.Column(db.String(500), nullable=False)
-    captured_at      = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    captured_at      = db.Column(db.DateTime, default=datetime.now, index=True)
     confidence_score = db.Column(db.Float, nullable=True)       # Distance from nearest match
     assigned_to_id   = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     # Deduplication support — stores the 128-d face encoding as JSON text
@@ -71,7 +71,7 @@ class SystemConfig(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     key = db.Column(db.String(100), unique=True, nullable=False)
     value = db.Column(db.String(500), nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
     @classmethod
     def get(cls, key, default=None):
@@ -86,7 +86,7 @@ class SystemConfig(db.Model):
         record = cls.query.filter_by(key=key).first()
         if record:
             record.value = str(value)
-            record.updated_at = datetime.utcnow()
+            record.updated_at = datetime.now()
         else:
             db.session.add(cls(key=key, value=str(value)))
         db.session.commit()

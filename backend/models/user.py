@@ -15,7 +15,7 @@ class User(db.Model):
     dept_id = db.Column(db.Integer, db.ForeignKey('departments.id'), nullable=True)
     image_path = db.Column(db.String(500), nullable=True)
     is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
 
     # Relationships
     department = db.relationship('Department', backref='users')

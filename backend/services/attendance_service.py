@@ -18,13 +18,13 @@ _cache_day = None
 
 
 def today_bounds(now=None):
-    now = now or datetime.utcnow()
+    now = now or datetime.now()
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     return start, start + timedelta(days=1)
 
 
 def attendance_for_session(user_id, session_id, now=None):
-    day = (now or datetime.utcnow()).date()
+    day = (now or datetime.now()).date()
     if session_id is None:
         return Attendance.query.filter(
             Attendance.user_id == int(user_id),
@@ -53,7 +53,7 @@ def mark_attendance_once(
     else:
         session_id = None
 
-    now = datetime.utcnow()
+    now = datetime.now()
     day = now.date()
     cooldown = _configured_cooldown(cooldown_seconds)
 

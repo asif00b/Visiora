@@ -65,7 +65,7 @@ export default function Login() {
                   value={form.email}
                   onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
                   className="input pl-10"
-                  placeholder="admin@system.com"
+                  placeholder="name@example.com"
                   required
                   autoComplete="email"
                 />
