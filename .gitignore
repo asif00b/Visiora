@@ -31,3 +31,6 @@ storage/unknown_faces/*
 *.onnx
 *.dat
 *.zip
+
+# Temporary deploy directories
+hf_deploy/
