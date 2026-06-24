@@ -119,6 +119,15 @@ def create_app():
     def serve_storage(filepath):
         return send_from_directory(os.path.abspath(_STORAGE_ROOT), filepath)
 
+    # ── Root Welcome ─────────────────────────────────────────────────────────
+    @app.route('/')
+    def root():
+        return jsonify({
+            'name': 'Visiora — Face Recognition Attendance System Backend',
+            'status': 'active',
+            'version': '6.1.0'
+        }), 200
+
     # ── Health check ─────────────────────────────────────────────────────────
     @app.route('/api/health')
     def health():
