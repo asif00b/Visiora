@@ -728,13 +728,13 @@ export default function Scanner() {
 
           <button
             onClick={toggleFullscreen}
-            className="absolute top-4 right-4 z-10 p-2.5 rounded-xl bg-black/60 hover:bg-black/80 text-white border border-slate-700/50 backdrop-blur-sm shadow-lg transition-all"
+            className="absolute bottom-4 right-4 z-10 p-2.5 rounded-xl bg-black/60 hover:bg-black/80 text-white border border-slate-700/50 backdrop-blur-sm shadow-lg transition-all"
             title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
           >
             {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
           </button>
 
-          <div className="absolute top-16 right-4 flex flex-col gap-2 z-10">
+          <div className="absolute top-4 right-4 flex flex-col gap-2 z-10">
             {notifications.map(n => (
               <div key={n.id} className="flex items-center gap-2 bg-emerald-950/90 border border-emerald-700/50 backdrop-blur-sm text-emerald-300 text-sm font-medium px-4 py-2.5 rounded-xl shadow-lg animate-slide-up">
                 <Zap size={14} className="text-emerald-400" />
