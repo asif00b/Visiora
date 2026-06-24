@@ -341,7 +341,9 @@ export default function Scanner() {
         // ── Simplified 3-line stats ──
         // Line 1: Status (plain English)
         let displayStatus = 'Scanning...'
-        if (face.debug.status === 'FACE_STABLE') displayStatus = 'Matched ✓'
+        if (face.debug.status === 'FACE_STABLE') {
+          displayStatus = matched ? 'Matched ✓' : 'Unknown'
+        }
         else if (face.debug.status === 'STABILIZING') displayStatus = 'Aligning...'
         else if (face.debug.status === 'LIVENESS_CHECK') displayStatus = 'Blink to Verify'
         else if (face.debug.status === 'SPOOF_DETECTED') displayStatus = 'Spoof Alert ✕'
