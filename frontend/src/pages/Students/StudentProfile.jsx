@@ -74,6 +74,10 @@ export default function StudentProfile() {
   }, [id])
 
   const handleSave = async () => {
+    if (editForm.phone && !/^01\d{9}$/.test(editForm.phone)) {
+      toast.error('Phone number must be an 11-digit Bangladeshi number starting with 01')
+      return
+    }
     setSaving(true)
     try {
       await updateUser(id, {
@@ -142,7 +146,7 @@ export default function StudentProfile() {
 
   if (loading) return (
     <div className="flex items-center justify-center py-20">
-      <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+      <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
     </div>
   )
 
@@ -174,18 +178,18 @@ export default function StudentProfile() {
               <img
                 src={imagePreview}
                 alt={user.name}
-                className="w-36 h-36 rounded-2xl object-cover border-2 border-indigo-500/40 shadow-xl shadow-indigo-500/10"
+                className="w-36 h-36 rounded-2xl object-cover border-2 border-cyan-500/40 shadow-xl shadow-cyan-500/10"
               />
             ) : hasValidImage ? (
               <img
                 src={`/storage/${user.image_path}`}
                 alt={user.name}
                 onError={() => setImgError(true)}
-                className="w-36 h-36 rounded-2xl object-cover border-2 border-indigo-500/40 shadow-xl shadow-indigo-500/10"
+                className="w-36 h-36 rounded-2xl object-cover border-2 border-cyan-500/40 shadow-xl shadow-cyan-500/10"
               />
             ) : (
-              <div className="w-36 h-36 rounded-2xl bg-indigo-600/20 border-2 border-indigo-500/30 flex items-center justify-center">
-                <span className="text-5xl font-black text-indigo-400">{user.name?.[0]?.toUpperCase()}</span>
+              <div className="w-36 h-36 rounded-2xl bg-cyan-600/15 border-2 border-cyan-500/25 flex items-center justify-center">
+                <span className="text-5xl font-black text-cyan-400">{user.name?.[0]?.toUpperCase()}</span>
               </div>
             )}
           </div>
@@ -213,25 +217,25 @@ export default function StudentProfile() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {user.student_id && (
                 <div className="flex items-center gap-2 text-sm text-slate-400">
-                  <Hash size={13} className="text-indigo-400" />
+                  <Hash size={13} className="text-cyan-400" />
                   <span className="text-slate-300">{user.student_id}</span>
                 </div>
               )}
               {user.email && (
                 <div className="flex items-center gap-2 text-sm text-slate-400">
-                  <Mail size={13} className="text-indigo-400" />
+                  <Mail size={13} className="text-cyan-400" />
                   <span className="text-slate-300 truncate">{user.email}</span>
                 </div>
               )}
               {user.phone && (
                 <div className="flex items-center gap-2 text-sm text-slate-400">
-                  <Phone size={13} className="text-indigo-400" />
+                  <Phone size={13} className="text-cyan-400" />
                   <span className="text-slate-300">{user.phone}</span>
                 </div>
               )}
               {user.dept_name && (
                 <div className="flex items-center gap-2 text-sm text-slate-400">
-                  <MapPin size={13} className="text-indigo-400" />
+                  <MapPin size={13} className="text-cyan-400" />
                   <span className="text-slate-300">{user.dept_name}</span>
                 </div>
               )}
@@ -263,7 +267,7 @@ export default function StudentProfile() {
             key={t}
             onClick={() => setTab(i)}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-all
-              ${tab === i ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+              ${tab === i ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
           >
             {t}
           </button>
@@ -279,17 +283,17 @@ export default function StudentProfile() {
               <img
                 src={imagePreview}
                 alt={user.name}
-                className="w-32 h-32 rounded-2xl object-cover border-2 border-indigo-500/40 shadow-lg"
+                className="w-32 h-32 rounded-2xl object-cover border-2 border-cyan-500/40 shadow-lg"
               />
             ) : hasValidImage ? (
               <img
                 src={`/storage/${user.image_path}`}
                 alt={user.name}
                 onError={() => setImgError(true)}
-                className="w-32 h-32 rounded-2xl object-cover border-2 border-indigo-500/40 shadow-lg"
+                className="w-32 h-32 rounded-2xl object-cover border-2 border-cyan-500/40 shadow-lg"
               />
             ) : (
-              <div className="w-32 h-32 rounded-2xl bg-indigo-600/20 border-2 border-indigo-500/20 flex items-center justify-center text-4xl font-black text-indigo-400">
+              <div className="w-32 h-32 rounded-2xl bg-cyan-600/15 border-2 border-cyan-500/20 flex items-center justify-center text-4xl font-black text-cyan-400">
                 {user.name?.[0]?.toUpperCase()}
               </div>
             )}
@@ -333,7 +337,7 @@ export default function StudentProfile() {
           {/* Right: Edit form */}
           <div className="lg:col-span-2 card space-y-4">
             <h2 className="font-bold text-slate-100 text-sm flex items-center gap-2">
-              <User size={15} className="text-indigo-400" /> Personal Information
+              <User size={15} className="text-cyan-400" /> Personal Information
             </h2>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -364,11 +368,12 @@ export default function StudentProfile() {
                 />
               </div>
               <div>
-                <label className="label">Phone</label>
+                <label className="label">Phone (01XXXXXXXXX)</label>
                 <input
                   value={editForm.phone || ''}
                   onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))}
                   className="input"
+                  placeholder="01XXXXXXXXX"
                   disabled={!(canManage || isOwnProfile)}
                 />
               </div>
@@ -437,7 +442,7 @@ export default function StudentProfile() {
             <div className="lg:col-span-2 card space-y-4">
               <div>
                 <h2 className="font-bold text-slate-100 flex items-center gap-2">
-                  <Camera size={15} className="text-indigo-400" /> AI-Guided Face Registration
+                  <Camera size={15} className="text-cyan-400" /> AI-Guided Face Registration
                 </h2>
                 <p className="text-sm text-slate-500 mt-0.5">
                   {user.has_face

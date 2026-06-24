@@ -161,7 +161,7 @@ export default function UnknownFaces() {
       {stats && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { label: 'Total Records', value: stats.total_db ?? unknowns.length, icon: BarChart2, color: 'text-indigo-400' },
+            { label: 'Total Records', value: stats.total_db ?? unknowns.length, icon: BarChart2, color: 'text-cyan-400' },
             { label: 'Files on Disk', value: stats.total_files ?? '—', icon: HardDrive, color: 'text-blue-400' },
             { label: 'Disk Usage', value: stats.disk_mb != null ? `${stats.disk_mb} MB` : '—', icon: HardDrive, color: 'text-amber-400' },
             { label: 'Oldest Entry', value: stats.oldest ? formatDistanceToNow(new Date(stats.oldest), { addSuffix: true }) : 'None', icon: Calendar, color: 'text-rose-400' },
@@ -182,8 +182,8 @@ export default function UnknownFaces() {
 
       {/* Bulk actions */}
       {selected.size > 0 && (
-        <div className="flex items-center gap-3 p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30">
-          <span className="text-sm text-indigo-300 font-medium">{selected.size} selected</span>
+        <div className="flex items-center gap-3 p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/25">
+          <span className="text-sm text-cyan-300 font-medium">{selected.size} selected</span>
           <button onClick={handleBulkDelete} className="btn-danger text-sm py-1.5">
             <Trash2 size={13} /> Delete Selected
           </button>
@@ -195,7 +195,7 @@ export default function UnknownFaces() {
 
       {loading ? (
         <div className="flex justify-center py-16">
-          <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
         </div>
       ) : !unknowns.length ? (
         <div className="text-center py-20 text-slate-500">
@@ -223,7 +223,7 @@ export default function UnknownFaces() {
               return (
                 <div
                   key={face.id}
-                  className={`card p-2.5 space-y-2 cursor-pointer transition-all ${isSelected ? 'ring-2 ring-indigo-500' : ''}`}
+                  className={`card p-2.5 space-y-2 cursor-pointer transition-all ${isSelected ? 'ring-2 ring-cyan-500' : ''}`}
                   onClick={() => toggleSelect(face.id)}
                 >
                   <div className="relative rounded-xl overflow-hidden bg-slate-800 aspect-square">
@@ -236,8 +236,8 @@ export default function UnknownFaces() {
                     />
                     {/* Selection overlay */}
                     {isSelected && (
-                      <div className="absolute inset-0 bg-indigo-500/30 flex items-center justify-center">
-                        <div className="w-6 h-6 rounded-full bg-indigo-500 flex items-center justify-center">
+                      <div className="absolute inset-0 bg-cyan-500/25 flex items-center justify-center">
+                        <div className="w-6 h-6 rounded-full bg-cyan-500 flex items-center justify-center">
                           <span className="text-white text-xs font-bold">✓</span>
                         </div>
                       </div>

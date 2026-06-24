@@ -35,6 +35,14 @@ export default function StudentRegister() {
       toast.error('Password must be at least 4 characters')
       return
     }
+    if (!form.phone) {
+      toast.error('Phone number is required')
+      return
+    }
+    if (!/^01\d{9}$/.test(form.phone)) {
+      toast.error('Phone number must be an 11-digit Bangladeshi number starting with 01')
+      return
+    }
     setLoading(true)
     try {
       const payload = { ...form }
@@ -88,7 +96,7 @@ export default function StudentRegister() {
         {STEPS.map((s, i) => (
           <div key={s} className="flex items-center gap-2">
             <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all
-              ${i < step ? 'bg-emerald-600 text-white' : i === step ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-500'}`}>
+              ${i < step ? 'bg-emerald-600 text-white' : i === step ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-500'}`}>
               {i < step ? <CheckCircle size={14} /> : i + 1}
             </div>
             <span className={`text-sm font-medium ${i === step ? 'text-slate-200' : 'text-slate-500'}`}>{s}</span>
@@ -118,8 +126,8 @@ export default function StudentRegister() {
               <input name="student_id" value={form.student_id} onChange={handleField} className="input" placeholder="STU001" />
             </div>
             <div>
-              <label className="label">Phone</label>
-              <input name="phone" value={form.phone} onChange={handleField} className="input" placeholder="+1234567890" />
+              <label className="label">Phone *</label>
+              <input name="phone" value={form.phone} onChange={handleField} className="input" placeholder="01XXXXXXXXX" required />
             </div>
             <div>
               <label className="label">Department</label>

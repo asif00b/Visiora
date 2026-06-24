@@ -12,7 +12,7 @@ const NavItem = ({ to, icon: Icon, label, onClick }) => (
     className={({ isActive }) =>
       `flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group
        ${isActive
-         ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30'
+         ? 'bg-cyan-600/15 text-cyan-400 border border-cyan-500/25'
          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'}`
     }
   >
@@ -84,8 +84,8 @@ export default function Sidebar({ onClose }) {
       {/* User footer */}
       <div className="border-t border-slate-800 p-4">
         <div className="flex items-center gap-3 mb-3">
-          <div className="w-9 h-9 rounded-full bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center flex-shrink-0">
-            <ShieldCheck size={16} className="text-indigo-400" />
+          <div className="w-9 h-9 rounded-full bg-cyan-600/15 border border-cyan-500/25 flex items-center justify-center flex-shrink-0">
+            <ShieldCheck size={16} className="text-cyan-400" />
           </div>
           <div className="min-w-0">
             <p className="text-sm font-semibold text-slate-200 truncate">{user?.name}</p>

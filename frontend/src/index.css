@@ -16,7 +16,7 @@
 
   body {
     font-family: 'Inter', system-ui, sans-serif;
-    background-color: #080d1a;
+    background-color: #060d1b;
     color: #f1f5f9;
     -webkit-font-smoothing: antialiased;
     min-height: 100vh;
@@ -27,28 +27,28 @@
     height: 6px;
   }
   ::-webkit-scrollbar-track {
-    background: #0f1629;
+    background: #0a1128;
   }
   ::-webkit-scrollbar-thumb {
-    background: #334155;
+    background: #1e3a5f;
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #475569;
+    background: #2a5080;
   }
 }
 
 @layer components {
   /* ── Card ── */
   .card {
-    @apply bg-slate-900 border border-slate-800 rounded-2xl p-6;
+    @apply bg-slate-900/80 border border-slate-700/40 rounded-2xl p-6;
   }
 
   .card-glass {
-    background: rgba(15, 22, 41, 0.7);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    @apply border border-slate-700/50 rounded-2xl p-6;
+    background: rgba(8, 18, 40, 0.75);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    @apply border border-cyan-900/30 rounded-2xl p-6;
   }
 
   /* ── Buttons ── */
@@ -57,7 +57,7 @@
   }
 
   .btn-primary {
-    @apply btn bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/30 active:scale-95;
+    @apply btn bg-cyan-600 hover:bg-cyan-500 text-white shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/30 active:scale-95;
   }
 
   .btn-secondary {
@@ -79,7 +79,7 @@
   /* ── Inputs ── */
   .input {
     @apply w-full bg-slate-800/60 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-slate-200 placeholder-slate-500
-           focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 transition-all duration-200;
+           focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 transition-all duration-200;
   }
 
   .label {
@@ -94,7 +94,7 @@
   .badge-success { @apply badge bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/30; }
   .badge-error   { @apply badge bg-rose-500/15 text-rose-400 ring-1 ring-rose-500/30; }
   .badge-warning { @apply badge bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/30; }
-  .badge-info    { @apply badge bg-indigo-500/15 text-indigo-400 ring-1 ring-indigo-500/30; }
+  .badge-info    { @apply badge bg-cyan-500/15 text-cyan-400 ring-1 ring-cyan-500/30; }
   .badge-gray    { @apply badge bg-slate-700/60 text-slate-400; }
 
   /* ── Table ── */
@@ -115,7 +115,7 @@
   }
 
   .table tbody tr {
-    @apply border-t border-slate-800 hover:bg-slate-800/30 transition-colors;
+    @apply border-t border-slate-800 hover:bg-cyan-950/20 transition-colors;
   }
 
   .table td {
@@ -144,14 +144,14 @@
 
 @layer utilities {
   .text-gradient {
-    background: linear-gradient(135deg, #818cf8 0%, #a78bfa 50%, #c084fc 100%);
+    background: linear-gradient(135deg, #22d3ee 0%, #06b6d4 40%, #0ea5e9 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
 
-  .glow-indigo {
-    box-shadow: 0 0 30px rgba(99, 102, 241, 0.15);
+  .glow-cyan {
+    box-shadow: 0 0 30px rgba(6, 182, 212, 0.15);
   }
 
   .glow-emerald {

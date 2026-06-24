@@ -91,11 +91,11 @@ export default function Sessions() {
             </div>
             <div className="flex flex-col gap-2 pt-5">
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={form.allow_multiple} onChange={e => setForm(f => ({ ...f, allow_multiple: e.target.checked }))} className="w-4 h-4 accent-indigo-500" />
+                <input type="checkbox" checked={form.allow_multiple} onChange={e => setForm(f => ({ ...f, allow_multiple: e.target.checked }))} className="w-4 h-4 accent-cyan-500" />
                 <span className="text-sm text-slate-300">Allow multiple per day</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={form.is_active} onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))} className="w-4 h-4 accent-indigo-500" />
+                <input type="checkbox" checked={form.is_active} onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))} className="w-4 h-4 accent-cyan-500" />
                 <span className="text-sm text-slate-300">Active</span>
               </label>
             </div>
@@ -109,13 +109,13 @@ export default function Sessions() {
 
       {/* List */}
       {loading ? (
-        <div className="flex justify-center py-10"><div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" /></div>
+        <div className="flex justify-center py-10"><div className="w-6 h-6 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" /></div>
       ) : (
         <div className="space-y-3">
           {sessions.map(s => (
             <div key={s.id} className={`card py-4 border ${s.is_currently_active ? 'border-emerald-500/40 glow-emerald' : ''}`}>
               <div className="flex items-start gap-4">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${s.is_currently_active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-indigo-600/20 text-indigo-400'}`}>
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${s.is_currently_active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-cyan-600/15 text-cyan-400'}`}>
                   <Calendar size={18} />
                 </div>
                 <div className="flex-1 min-w-0">

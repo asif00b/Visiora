@@ -147,7 +147,7 @@ export default function StudentList() {
       {/* Table */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
         </div>
       ) : (
         <div className="table-wrapper">
@@ -175,7 +175,7 @@ export default function StudentList() {
                           className="w-8 h-8 rounded-full object-cover border border-slate-700"
                         />
                       ) : (
-                        <div className="w-8 h-8 rounded-full bg-indigo-600/20 border border-indigo-500/20 flex items-center justify-center text-xs font-bold text-indigo-400">
+                        <div className="w-8 h-8 rounded-full bg-cyan-600/15 border border-cyan-500/20 flex items-center justify-center text-xs font-bold text-cyan-400">
                           {user.name[0]}
                         </div>
                       )}
@@ -213,7 +213,7 @@ export default function StudentList() {
                         <button
                           id={`register-face-${user.id}`}
                           onClick={() => navigate(`/students/${user.id}`, { state: { openFaceTab: true } })}
-                          className="btn-icon text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/15"
+                          className="btn-icon text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/15"
                           title="Register face"
                         >
                           <Camera size={15} />

@@ -297,7 +297,7 @@ export default function GuidedCapture({ onCapture, maxImages = 10 }) {
                 ${i < captures.length
                   ? 'bg-emerald-600 text-white'
                   : i === stepIdx && !isDone
-                    ? 'bg-indigo-600 text-white ring-2 ring-indigo-400/50'
+                    ? 'bg-cyan-600 text-white ring-2 ring-cyan-400/50'
                     : 'bg-slate-800 text-slate-500'
                 }`}>
                 {i < captures.length ? <CheckCircle size={14} /> : i + 1}
@@ -346,8 +346,8 @@ export default function GuidedCapture({ onCapture, maxImages = 10 }) {
         {/* Start Scan Overlay */}
         {isActive && !isScanning && (
           <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-10">
-            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 mb-4 animate-bounce">
-              <Camera size={26} className="text-indigo-400" />
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-cyan-600/15 border border-cyan-500/25 mb-4 animate-bounce">
+              <Camera size={26} className="text-cyan-400" />
             </div>
             <h3 className="text-lg font-bold text-slate-100 mb-1">Guided Face Registration</h3>
             <p className="text-xs text-slate-400 max-w-xs mb-6">
@@ -359,7 +359,7 @@ export default function GuidedCapture({ onCapture, maxImages = 10 }) {
                 setStatus('waiting')
                 setInstruction(steps[0].label)
               }}
-              className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm transition-all hover:scale-105 active:scale-95 shadow-lg shadow-indigo-500/25"
+              className="px-6 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-sm transition-all hover:scale-105 active:scale-95 shadow-lg shadow-cyan-500/25"
               type="button"
             >
               Start Scan
@@ -374,10 +374,10 @@ export default function GuidedCapture({ onCapture, maxImages = 10 }) {
               <div className={`w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 transition-colors
                 ${status === 'hold' || status === 'captured'
                   ? 'bg-emerald-500/20 border-2 border-emerald-500'
-                  : 'bg-indigo-500/20 border-2 border-indigo-500'}`}>
+                  : 'bg-cyan-500/20 border-2 border-cyan-500'}`}>
                 {status === 'captured'
                   ? <CheckCircle size={22} className="text-emerald-400" />
-                  : <StepIcon size={22} className={status === 'hold' ? 'text-emerald-400' : 'text-indigo-400'} />
+                  : <StepIcon size={22} className={status === 'hold' ? 'text-emerald-400' : 'text-cyan-400'} />
                 }
               </div>
               <div className="flex-1">

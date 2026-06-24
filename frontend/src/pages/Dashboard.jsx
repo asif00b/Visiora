@@ -132,8 +132,8 @@ export default function Dashboard() {
     datasets: [{
       label: 'Attendance',
       data: stats.trend.map(d => d.count),
-      backgroundColor: 'rgba(99, 102, 241, 0.6)',
-      borderColor: 'rgba(99, 102, 241, 1)',
+      backgroundColor: 'rgba(6, 182, 212, 0.6)',
+      borderColor: 'rgba(6, 182, 212, 1)',
       borderWidth: 1,
       borderRadius: 6,
     }]
@@ -177,7 +177,7 @@ export default function Dashboard() {
                   </span>
                 </div>
               </div>
-              <CalendarCheck size={28} className="text-indigo-400" />
+              <CalendarCheck size={28} className="text-cyan-400" />
             </div>
 
             <div className="card flex items-center justify-between p-4">
@@ -212,7 +212,7 @@ export default function Dashboard() {
           </div>
 
           {/* Quick Profile Redirect Action */}
-          <div className="card p-5 flex flex-col sm:flex-row items-center justify-between gap-4 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950/20">
+          <div className="card p-5 flex flex-col sm:flex-row items-center justify-between gap-4 bg-gradient-to-r from-slate-900 via-slate-800 to-cyan-950/20">
             <div>
               <h4 className="font-semibold text-slate-200">Face Scan & Profile Photo</h4>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -242,7 +242,7 @@ export default function Dashboard() {
                 <button
                   onClick={() => setPreset('all')}
                   className={`text-xs px-3 py-1.5 rounded-md font-medium transition-all ${
-                    preset === 'all' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                    preset === 'all' ? 'bg-cyan-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
                   All Time
@@ -250,7 +250,7 @@ export default function Dashboard() {
                 <button
                   onClick={() => setPreset('week')}
                   className={`text-xs px-3 py-1.5 rounded-md font-medium transition-all ${
-                    preset === 'week' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                    preset === 'week' ? 'bg-cyan-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
                   This Week
@@ -258,7 +258,7 @@ export default function Dashboard() {
                 <button
                   onClick={() => setPreset('month')}
                   className={`text-xs px-3 py-1.5 rounded-md font-medium transition-all ${
-                    preset === 'month' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                    preset === 'month' ? 'bg-cyan-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
                   This Month
@@ -336,7 +336,7 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatsCard title="Total Users" value={stats?.total_users ?? '—'} icon={Users} color="indigo" />
+              <StatsCard title="Total Users" value={stats?.total_users ?? '—'} icon={Users} color="cyan" />
               <StatsCard title="Today's Attendance" value={stats?.today_count ?? '—'} icon={CalendarCheck} color="emerald" />
               <StatsCard title="Total Records" value={stats?.total_records ?? '—'} icon={Database} color="violet" />
               <StatsCard
@@ -357,7 +357,7 @@ export default function Dashboard() {
                   <h2 className="text-lg font-bold text-slate-100">Attendance Trend</h2>
                   <p className="text-xs text-slate-500 mt-0.5">Last 7 days</p>
                 </div>
-                <TrendingUp size={20} className="text-indigo-400" />
+                <TrendingUp size={20} className="text-cyan-400" />
               </div>
               <Bar data={chartData} options={chartOptions} height={80} />
             </div>
@@ -367,9 +367,9 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <button
               onClick={() => navigate('/scanner')}
-              className="card hover:border-indigo-500/40 transition-all duration-300 text-left group"
+              className="card hover:border-cyan-500/40 transition-all duration-300 text-left group"
             >
-              <Camera size={24} className="text-indigo-400 mb-3 group-hover:scale-110 transition-transform" />
+              <Camera size={24} className="text-cyan-400 mb-3 group-hover:scale-110 transition-transform" />
               <h3 className="font-bold text-slate-100">Open Scanner</h3>
               <p className="text-sm text-slate-500 mt-1">Launch real-time face recognition</p>
             </button>

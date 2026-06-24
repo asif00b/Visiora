@@ -12,6 +12,31 @@ logger = logging.getLogger(__name__)
 
 ARCFACE_AVAILABLE = False
 _INIT_ERROR = ""
+# ── Register Nvidia CUDA/cuDNN DLL paths for Windows ──────────────────────────
+import sys
+if sys.platform == 'win32':
+    for path in sys.path:
+        abs_path = os.path.abspath(path)
+        if 'site-packages' in abs_path:
+            # 1. Register nvidia CUDA/cuDNN DLLs
+            nvidia_base = os.path.join(abs_path, 'nvidia')
+            if os.path.exists(nvidia_base):
+                for root, dirs, files in os.walk(nvidia_base):
+                    if 'bin' in dirs:
+                        bin_dir = os.path.abspath(os.path.join(root, 'bin'))
+                        if any(f.endswith('.dll') for f in os.listdir(bin_dir)):
+                            try:
+                                os.add_dll_directory(bin_dir)
+                            except Exception:
+                                pass
+            # 2. Register onnxruntime/capi DLLs in PATH and DLL directory (for dynamic cuDNN sub-DLL loading)
+            ort_capi = os.path.abspath(os.path.join(abs_path, 'onnxruntime', 'capi'))
+            if os.path.exists(ort_capi):
+                os.environ['PATH'] = ort_capi + os.pathsep + os.environ['PATH']
+                try:
+                    os.add_dll_directory(ort_capi)
+                except Exception:
+                    pass
 
 try:
     from insightface.app import FaceAnalysis
@@ -181,13 +206,14 @@ class ArcFaceEngine:
         )
         ctx_id = 0 if use_cuda else -1
 
+        det_thresh = float(os.environ.get("INSIGHTFACE_DET_THRESH", "0.65"))
         try:
             self._app = FaceAnalysis(
                 name=self._model_name,
                 providers=providers,
                 allowed_modules=["detection", "recognition"],
             )
-            self._app.prepare(ctx_id=ctx_id, det_size=(self._det_size, self._det_size))
+            self._app.prepare(ctx_id=ctx_id, det_thresh=det_thresh, det_size=(self._det_size, self._det_size))
         except Exception as exc:
             if use_cuda:
                 logger.warning("[ArcFace] CUDA init failed, retrying CPU: %s", exc)
@@ -196,7 +222,7 @@ class ArcFaceEngine:
                     providers=["CPUExecutionProvider"],
                     allowed_modules=["detection", "recognition"],
                 )
-                self._app.prepare(ctx_id=-1, det_size=(self._det_size, self._det_size))
+                self._app.prepare(ctx_id=-1, det_thresh=det_thresh, det_size=(self._det_size, self._det_size))
             else:
                 logger.error("[ArcFace] Init failed: %s", exc)
                 return False

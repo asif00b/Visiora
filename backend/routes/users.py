@@ -49,6 +49,12 @@ def create_user():
         if not data.get(field):
             return jsonify({'success': False, 'message': f'{field} is required'}), 400
 
+    phone = data.get('phone')
+    if phone:
+        import re
+        if not re.match(r'^01\d{9}$', str(phone)):
+            return jsonify({'success': False, 'message': 'Phone must be an 11-digit Bangladeshi number starting with 01'}), 400
+
     # HR cannot create admins
     current = get_current_user()
     if current.role == 'hr' and data['role'] == 'admin':
@@ -108,7 +114,14 @@ def update_user(uid):
             return jsonify({'success': False, 'message': 'Email already in use'}), 409
         user.email = data['email'].lower().strip()
     if 'phone' in data:
-        user.phone = data['phone'] or None
+        phone = data['phone']
+        if phone:
+            import re
+            if not re.match(r'^01\d{9}$', str(phone)):
+                return jsonify({'success': False, 'message': 'Phone must be an 11-digit Bangladeshi number starting with 01'}), 400
+            user.phone = phone
+        else:
+            user.phone = None
     if 'dept_id' in data:
         user.dept_id = data['dept_id'] if data['dept_id'] != '' else None
     if 'student_id' in data:

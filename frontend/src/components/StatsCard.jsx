@@ -1,8 +1,9 @@
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
 
-export default function StatsCard({ title, value, subtitle, icon: Icon, color = 'indigo', trend }) {
+export default function StatsCard({ title, value, subtitle, icon: Icon, color = 'cyan', trend }) {
   const colors = {
-    indigo: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20',
+    cyan: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20',
+    indigo: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20',
     emerald: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
     rose: 'text-rose-400 bg-rose-500/10 border-rose-500/20',
     amber: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
@@ -16,7 +17,7 @@ export default function StatsCard({ title, value, subtitle, icon: Icon, color = 
     <div className="stat-card group hover:border-slate-700 transition-all duration-300">
       {/* Background glow */}
       <div className={`absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500
-        ${color === 'indigo' ? 'bg-indigo-500/3' : color === 'emerald' ? 'bg-emerald-500/3' : 'bg-rose-500/3'}`}
+        ${color === 'cyan' ? 'bg-cyan-500/3' : color === 'emerald' ? 'bg-emerald-500/3' : color === 'violet' ? 'bg-violet-500/3' : 'bg-rose-500/3'}`}
       />
 
       <div className="relative flex items-start justify-between">

@@ -9,10 +9,10 @@ echo ============================================================
 echo.
 
 echo [1/3] Starting Backend (Python)...
-start "Visiora Backend" cmd /k "cd /d %~dp0backend && python app.py"
+start "Visiora Backend" cmd /k "cd /d %~dp0backend && venv\Scripts\python app.py"
 
 echo [2/3] Starting Frontend (Vite)...
-start "Visiora Frontend" cmd /k "cd /d %~dp0frontend && npm run dev"
+start "Visiora Frontend" cmd /k "cd /d %~dp0frontend && npm.cmd run dev"
 
 echo [3/3] Launching web browser...
 timeout /t 4 /nobreak >nul

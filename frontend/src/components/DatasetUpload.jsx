@@ -122,7 +122,7 @@ export default function DatasetUpload({ userId, userName }) {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="font-bold text-slate-100 flex items-center gap-2">
-            <Cpu size={16} className="text-indigo-400" />
+            <Cpu size={16} className="text-cyan-400" />
             Training Dataset Upload
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
@@ -138,7 +138,7 @@ export default function DatasetUpload({ userId, userName }) {
       {/* Current encoding stats */}
       {loading ? (
         <div className="flex justify-center py-4">
-          <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          <div className="w-5 h-5 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
         </div>
       ) : info ? (
         <div className="space-y-3">
@@ -146,7 +146,7 @@ export default function DatasetUpload({ userId, userName }) {
           <div className="space-y-1.5">
             <div className="flex justify-between text-xs text-slate-400">
               <span className="flex items-center gap-1.5">
-                <Database size={11} className="text-indigo-400" />
+                <Database size={11} className="text-cyan-400" />
                 Encodings stored
               </span>
               <span>
@@ -159,7 +159,7 @@ export default function DatasetUpload({ userId, userName }) {
             <div className="w-full h-2 rounded-full bg-slate-700">
               <div
                 className={`h-2 rounded-full transition-all duration-500 ${
-                  info.total >= MAX ? 'bg-rose-500' : info.total >= MAX * 0.7 ? 'bg-amber-500' : 'bg-indigo-500'
+                  info.total >= MAX ? 'bg-rose-500' : info.total >= MAX * 0.7 ? 'bg-amber-500' : 'bg-cyan-500'
                 }`}
                 style={{ width: `${(info.total / MAX) * 100}%` }}
               />
@@ -179,7 +179,7 @@ export default function DatasetUpload({ userId, userName }) {
           {/* Type breakdown pills */}
           <div className="flex flex-wrap gap-2">
             {info.type_breakdown?.individual > 0 && (
-              <TypePill label="Guided" count={info.type_breakdown.individual} color="bg-indigo-500/10 border-indigo-500/30 text-indigo-300" />
+              <TypePill label="Guided" count={info.type_breakdown.individual} color="bg-cyan-500/10 border-cyan-500/25 text-cyan-300" />
             )}
             {info.type_breakdown?.dataset > 0 && (
               <TypePill label="Dataset" count={info.type_breakdown.dataset} color="bg-emerald-500/10 border-emerald-500/30 text-emerald-300" />
@@ -222,10 +222,10 @@ export default function DatasetUpload({ userId, userName }) {
           className={`
             border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all duration-200
             ${dragging
-              ? 'border-indigo-400 bg-indigo-500/10 scale-[1.01]'
+              ? 'border-cyan-400 bg-cyan-500/10 scale-[1.01]'
               : selectedFiles.length
               ? 'border-emerald-500/50 bg-emerald-500/5'
-              : 'border-slate-600 hover:border-indigo-500/60 hover:bg-indigo-500/5'}
+              : 'border-slate-600 hover:border-cyan-500/60 hover:bg-cyan-500/5'}
           `}
         >
           <input
@@ -253,7 +253,7 @@ export default function DatasetUpload({ userId, userName }) {
               <p className="text-xs text-slate-600">
                 JPEG · PNG · BMP · WEBP · ZIP — up to {slots} image(s) will be processed
               </p>
-              <p className="text-xs text-indigo-400">
+              <p className="text-xs text-cyan-400">
                 More diverse angles = significantly better recognition accuracy
               </p>
             </div>
@@ -284,7 +284,7 @@ export default function DatasetUpload({ userId, userName }) {
           {uploading && (
             <div className="w-full h-1.5 rounded-full bg-slate-700">
               <div
-                className="h-1.5 rounded-full bg-indigo-500 transition-all duration-300"
+                className="h-1.5 rounded-full bg-cyan-500 transition-all duration-300"
                 style={{ width: `${progress}%` }}
               />
             </div>

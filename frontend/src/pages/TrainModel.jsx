@@ -16,7 +16,7 @@ const api = {
 }
 
 // ── Stat card ─────────────────────────────────────────────────────────────────
-const StatCard = ({ icon: Icon, label, value, sub, accent = 'text-indigo-400', bg = 'bg-indigo-500/10' }) => (
+const StatCard = ({ icon: Icon, label, value, sub, accent = 'text-cyan-400', bg = 'bg-cyan-500/10' }) => (
   <div className="card-glass px-5 py-4 flex items-center gap-4">
     <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${bg} border border-slate-700`}>
       <Icon size={20} className={accent} />
@@ -54,7 +54,7 @@ const JobCard = ({ jid, job }) => {
         <div className="flex items-center gap-3">
           {job.status === 'running' && (
             <div className="w-24 h-1.5 rounded-full bg-slate-700">
-              <div className="h-1.5 rounded-full bg-indigo-500 transition-all" style={{ width: `${job.progress}%` }} />
+              <div className="h-1.5 rounded-full bg-cyan-500 transition-all" style={{ width: `${job.progress}%` }} />
             </div>
           )}
           {open ? <ChevronUp size={14} className="text-slate-500" /> : <ChevronDown size={14} className="text-slate-500" />}
@@ -210,7 +210,7 @@ export default function TrainModel() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="section-title flex items-center gap-2">
-            <Brain size={22} className="text-indigo-400" /> Train Model
+            <Brain size={22} className="text-cyan-400" /> Train Model
           </h1>
           <p className="section-subtitle">
             Add face images for registered users to improve recognition accuracy.
@@ -229,11 +229,11 @@ export default function TrainModel() {
       {/* ── Stats row ──────────────────────────────────────────────────────── */}
       {loading ? (
         <div className="flex justify-center py-10">
-          <div className="w-7 h-7 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          <div className="w-7 h-7 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
         </div>
       ) : stats && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard icon={Database} label="Total Encodings" value={stats.total_encodings} accent="text-indigo-400" bg="bg-indigo-500/10" />
+          <StatCard icon={Database} label="Total Encodings" value={stats.total_encodings} accent="text-cyan-400" bg="bg-cyan-500/10" />
           <StatCard icon={Users} label="Trained Users" value={stats.trained_users}
             sub={`of ${stats.total_users} users`} accent="text-emerald-400" bg="bg-emerald-500/10" />
           <StatCard icon={AlertCircle} label="Untrained Users" value={stats.untrained_users}
@@ -267,8 +267,8 @@ export default function TrainModel() {
       <div className="card space-y-5">
         {/* Section header */}
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
-            <HardDrive size={16} className="text-indigo-400" />
+          <div className="w-9 h-9 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center">
+            <HardDrive size={16} className="text-cyan-400" />
           </div>
           <div>
             <h2 className="font-bold text-slate-100 text-base">Upload Face Dataset</h2>
@@ -278,7 +278,7 @@ export default function TrainModel() {
 
         {/* ZIP format guide */}
         <div className="bg-slate-950 rounded-xl p-4 font-mono text-xs text-slate-400 space-y-0.5 border border-slate-800">
-          <p className="text-indigo-300 mb-1">dataset.zip</p>
+          <p className="text-cyan-300 mb-1">dataset.zip</p>
           <p className="text-slate-300">├── <span className="text-emerald-300">Asif Rahman</span>/</p>
           <p className="ml-4">├── photo1.jpg</p>
           <p className="ml-4">└── photo2.jpg</p>
@@ -290,7 +290,7 @@ export default function TrainModel() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => setCreateUsers(v => !v)}
-            className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${createUsers ? 'bg-indigo-600' : 'bg-slate-700'}`}
+            className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${createUsers ? 'bg-cyan-600' : 'bg-slate-700'}`}
           >
             <span className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all ${createUsers ? 'left-6' : 'left-1'}`} />
           </button>
@@ -307,10 +307,10 @@ export default function TrainModel() {
           className={`
             border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all duration-200
             ${dragging
-              ? 'border-indigo-400 bg-indigo-500/10 scale-[1.01]'
+              ? 'border-cyan-400 bg-cyan-500/10 scale-[1.01]'
               : zipFile
               ? 'border-emerald-500/50 bg-emerald-500/5'
-              : 'border-slate-600 hover:border-indigo-500/60 hover:bg-indigo-500/5'}
+              : 'border-slate-600 hover:border-cyan-500/60 hover:bg-cyan-500/5'}
           `}
         >
           <input
@@ -354,7 +354,7 @@ export default function TrainModel() {
             {uploading && (
               <div className="w-full h-1.5 rounded-full bg-slate-700">
                 <div
-                  className="h-1.5 rounded-full bg-indigo-500 transition-all duration-300"
+                  className="h-1.5 rounded-full bg-cyan-500 transition-all duration-300"
                   style={{ width: `${progress}%` }}
                 />
               </div>
@@ -368,9 +368,9 @@ export default function TrainModel() {
         <div className="card space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="font-bold text-slate-100 flex items-center gap-2">
-              <Clock size={15} className="text-indigo-400" />
+              <Clock size={15} className="text-cyan-400" />
               Training Jobs
-              <span className="text-xs bg-indigo-600/50 px-2 py-0.5 rounded-full">{jobList.length}</span>
+              <span className="text-xs bg-cyan-600/50 px-2 py-0.5 rounded-full">{jobList.length}</span>
             </h2>
             <button onClick={loadData} disabled={loading} className="btn-secondary text-xs py-1.5">
               <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refresh

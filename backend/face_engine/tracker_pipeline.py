@@ -29,11 +29,11 @@ def compute_dist(box_a, box_b):
 
 
 def _create_tracker():
-    requested = os.environ.get("TRACKER_ALGORITHM", "KCF").upper()
+    requested = os.environ.get("TRACKER_ALGORITHM", "IOU").upper()
     order = {
         "CSRT": ["TrackerCSRT_create", "TrackerKCF_create", "TrackerMIL_create"],
         "KCF": ["TrackerKCF_create", "TrackerCSRT_create", "TrackerMIL_create"],
-        "MIL": ["TrackerMIL_create", "TrackerKCF_create", "TrackerCSRT_create"],
+        "MIL": ["TrackerMIL_create", "TrackerKCF_create", "TrackerMIL_create"],
     }.get(requested, ["TrackerKCF_create", "TrackerCSRT_create", "TrackerMIL_create"])
 
     for name in order:
@@ -93,6 +93,133 @@ class TrackingPipeline:
         self.last_cleanup = time.time()
         self.tracker_backend = "unknown"
 
+    def _calculate_ear(self, state, track_id, box, frame_rgb):
+        tx, ty, tx2, ty2 = box
+        try:
+            from face_engine.liveness import get_eye_aspect_ratio_from_image
+            top_b, right_b, bottom_b, left_b = ty, tx2, ty2, tx
+            ear = get_eye_aspect_ratio_from_image(frame_rgb, (top_b, right_b, bottom_b, left_b))
+            if ear is not None:
+                ear_history = state.track_ear_history.setdefault(track_id, [])
+                ear_history.append(ear)
+                if len(ear_history) > 15:
+                    ear_history.pop(0)
+                
+                if len(ear_history) >= 5:
+                    ear_var = float(np.var(ear_history))
+                    if ear_var < 0.00004:
+                        state.track_liveness_confirmed[track_id] = False
+                    else:
+                        state.track_liveness_confirmed[track_id] = True
+        except Exception as exc:
+            logger.debug("[Tracker] EAR check failed: %s", exc)
+
+    def _process_iou_tracking(self, state, frame_rgb, detector_func, current_faces, liveness_enabled=False):
+        try:
+            bboxes, kpss = detector_func(frame_rgb)
+        except Exception as exc:
+            logger.debug("[Tracker] IOU Detection skipped: %s", exc)
+            return
+
+        h, w = frame_rgb.shape[:2]
+        
+        detections = []
+        if bboxes is not None:
+            for idx, det_box in enumerate(bboxes):
+                x1, y1, x2, y2 = map(int, det_box[:4])
+                x1, y1 = max(0, x1), max(0, y1)
+                x2, y2 = min(w, x2), min(h, y2)
+                dw, dh = x2 - x1, y2 - y1
+                if dw < 40 or dh < 40:
+                    continue
+                cur_kps = kpss[idx] if kpss is not None and idx < len(kpss) else None
+                detections.append({
+                    "box": (x1, y1, x2, y2),
+                    "kps": cur_kps
+                })
+
+        active_track_ids = list(state.track_bboxes.keys())
+        
+        # Bipartite greedy matching
+        pairs = []
+        for det_idx, det in enumerate(detections):
+            for tid in active_track_ids:
+                iou = compute_iou(det["box"], state.track_bboxes[tid])
+                pairs.append((iou, det_idx, tid))
+                
+        pairs.sort(key=lambda x: x[0], reverse=True)
+        
+        matched_detections = set()
+        matched_tracks = set()
+        
+        for iou, det_idx, tid in pairs:
+            if iou < 0.20:
+                break
+            if det_idx not in matched_detections and tid not in matched_tracks:
+                matched_detections.add(det_idx)
+                matched_tracks.add(tid)
+                
+                det = detections[det_idx]
+                box = det["box"]
+                kps = det["kps"]
+                
+                state.track_bboxes[tid] = box
+                state.track_kpss[tid] = kps
+                if kps is not None:
+                    state.track_rel_kpss[tid] = [(p[0] - box[0], p[1] - box[1]) for p in kps]
+                
+                cache = state.track_cache.setdefault(tid, {})
+                cache["lost_count"] = 0
+                
+                self._calculate_ear(state, tid, box, frame_rgb)
+                current_faces[tid] = (box, kps)
+
+        # Stale tracks cleanup
+        max_lost = int(os.environ.get("TRACKER_IOU_MAX_LOST_FRAMES", "2"))
+        for tid in active_track_ids:
+            if tid not in matched_tracks:
+                cache = state.track_cache.setdefault(tid, {})
+                cache["lost_count"] = cache.get("lost_count", 0) + 1
+                if cache["lost_count"] > max_lost:
+                    state.cleanup_tracker(tid)
+                else:
+                    current_faces[tid] = (state.track_bboxes[tid], state.track_kpss.get(tid))
+
+        # Spawn new tracks
+        for det_idx, det in enumerate(detections):
+            if det_idx not in matched_detections:
+                # Suppress if it overlaps with any existing active track box (to prevent duplicate tracks)
+                is_duplicate = any(
+                    compute_iou(det["box"], state.track_bboxes[tid]) > 0.20
+                    for tid in state.track_bboxes.keys()
+                )
+                if is_duplicate:
+                    continue
+
+                if len(state.trackers) >= self.MAX_TRACKERS:
+                    continue
+                
+                track_id = state.next_track_id
+                state.next_track_id += 1
+                box = det["box"]
+                kps = det["kps"]
+                
+                state.trackers[track_id] = "IOU_TRACKER"
+                state.track_bboxes[track_id] = box
+                state.track_kpss[track_id] = kps
+                if kps is not None:
+                    state.track_rel_kpss[track_id] = [(p[0] - box[0], p[1] - box[1]) for p in kps]
+                    
+                state.track_cache[track_id] = {
+                    "age": 0,
+                    "lost_count": 0,
+                    "frames_since_rec": self.REC_REFRESH_INTERVAL,
+                    "history": [],
+                }
+                
+                self._calculate_ear(state, track_id, box, frame_rgb)
+                current_faces[track_id] = (box, kps)
+
     def process_frame(self, scanner_id, frame_rgb, detector_func, recognizer_func):
         h, w = frame_rgb.shape[:2]
 
@@ -110,14 +237,20 @@ class TrackingPipeline:
             liveness_enabled = False
 
         current_faces = {}
-        is_detection_frame = (
-            state.frame_idx % self.DETECTION_INTERVAL == 0
-        ) or not state.trackers
+        
+        algo = os.environ.get("TRACKER_ALGORITHM", "IOU").upper()
+        if algo == "IOU":
+            self.tracker_backend = "IOU"
+            self._process_iou_tracking(state, frame_rgb, detector_func, current_faces, liveness_enabled)
+        else:
+            is_detection_frame = (
+                state.frame_idx % self.DETECTION_INTERVAL == 0
+            ) or not state.trackers
 
-        self._update_trackers(state, frame_rgb, w, h, current_faces, liveness_enabled)
+            self._update_trackers(state, frame_rgb, w, h, current_faces, liveness_enabled)
 
-        if is_detection_frame:
-            self._detect_new_tracks(state, frame_rgb, detector_func, current_faces)
+            if is_detection_frame:
+                self._detect_new_tracks(state, frame_rgb, detector_func, current_faces)
 
         self._recognize_stable_tracks(state, frame_rgb, recognizer_func)
         results = self._package_results(state, current_faces, w, h, liveness_enabled)
@@ -340,9 +473,9 @@ class TrackingPipeline:
                     else:
                         status = "LIVENESS_CHECK"
 
-                status_color = "#eab308" if status in ("STABILIZING", "LIVENESS_CHECK") else "#10b981"
+                status_color = "#f59e0b" if status in ("STABILIZING", "LIVENESS_CHECK") else "#06b6d4"
                 if status == "SPOOF_DETECTED" or (user_id == "Unknown" and cache.get("age", 0) >= self.STABLE_AGE_REQ):
-                    status_color = "#ef4444"
+                    status_color = "#f43f5e"
 
                 res["debug"] = {
                     "status": status,

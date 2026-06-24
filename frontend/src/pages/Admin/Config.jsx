@@ -83,7 +83,7 @@ export default function AdminConfig() {
 
   if (loading) return (
     <div className="flex justify-center py-20">
-      <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+      <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
     </div>
   )
 
@@ -114,7 +114,7 @@ export default function AdminConfig() {
               </div>
             ))}
             <div className="text-sm text-slate-400">
-              <Cpu size={13} className="inline mr-1 text-indigo-400" />
+              <Cpu size={13} className="inline mr-1 text-cyan-400" />
               Model: <strong className="text-slate-200 uppercase">{sysInfo.recommended_model || 'HOG'}</strong>
             </div>
             <div className="text-sm text-slate-400">
@@ -184,7 +184,7 @@ export default function AdminConfig() {
             disabled={storageOp !== null}
             className="btn-secondary flex-col items-center py-3 gap-1 h-auto"
           >
-            <Zap size={18} className={storageOp === 'unk_cleanup' ? 'animate-spin' : 'text-indigo-400'} />
+            <Zap size={18} className={storageOp === 'unk_cleanup' ? 'animate-spin' : 'text-cyan-400'} />
             <span className="text-xs font-medium">Unknown Cleanup</span>
             <span className="text-[10px] text-slate-500">Remove stale & duplicates</span>
           </button>
@@ -202,7 +202,7 @@ export default function AdminConfig() {
                 <button
                   id={`toggle-${meta.key}`}
                   onClick={() => setValue(meta.key, config[meta.key] === 'true' ? 'false' : 'true')}
-                  className={`relative w-12 h-6 rounded-full transition-colors duration-200 ${config[meta.key] === 'true' ? 'bg-indigo-600' : 'bg-slate-700'}`}
+                  className={`relative w-12 h-6 rounded-full transition-colors duration-200 ${config[meta.key] === 'true' ? 'bg-cyan-600' : 'bg-slate-700'}`}
                 >
                   <span className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all duration-200 ${config[meta.key] === 'true' ? 'left-7' : 'left-1'}`} />
                 </button>

@@ -40,7 +40,7 @@ export default function Login() {
         vx: (Math.random() - 0.5) * 0.35, // slow moving
         vy: (Math.random() - 0.5) * 0.35,
         radius: Math.random() * 1.5 + 1,
-        color: `rgba(99, 102, 241, ${Math.random() * 0.12 + 0.06})` // soft indigo glowing dots
+        color: `rgba(6, 182, 212, ${Math.random() * 0.12 + 0.06})` // soft cyan glowing dots
       })
     }
     
@@ -63,7 +63,7 @@ export default function Login() {
       })
       
       // Draw faint connections (constellation mesh)
-      ctx.strokeStyle = 'rgba(99, 102, 241, 0.05)'
+      ctx.strokeStyle = 'rgba(6, 182, 212, 0.05)'
       ctx.lineWidth = 0.7
       for (let i = 0; i < particles.length; i++) {
         for (let j = i + 1; j < particles.length; j++) {
@@ -103,7 +103,7 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-[#090d16]">
+    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-[#060d1b]">
       {/* Particle Canvas */}
       <canvas
         ref={canvasRef}
@@ -113,36 +113,36 @@ export default function Login() {
 
       {/* Static Background gradients */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none" style={{ zIndex: 0 }}>
-        <div className="absolute -top-40 -right-40 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-violet-600/10 rounded-full blur-3xl" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-indigo-950/5 rounded-full blur-3xl" />
+        <div className="absolute -top-40 -right-40 w-96 h-96 bg-cyan-600/10 rounded-full blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-sky-600/10 rounded-full blur-3xl" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-cyan-950/5 rounded-full blur-3xl" />
       </div>
 
       <div className="relative w-full max-w-md animate-slide-up z-10">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 mb-4 shadow-xl shadow-indigo-500/10">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-8 h-8 text-indigo-400">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-cyan-600/20 border border-cyan-500/30 mb-4 shadow-xl shadow-cyan-500/10">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-8 h-8 text-cyan-400">
               {/* Focus Brackets / Tech Border */}
-              <path d="M3 8V5a2 2 0 0 1 2-2h3" className="stroke-indigo-500" strokeWidth="2" />
-              <path d="M16 3h3a2 2 0 0 1 2 2v3" className="stroke-indigo-500" strokeWidth="2" />
-              <path d="M21 16v3a2 2 0 0 1-2 2h-3" className="stroke-indigo-500" strokeWidth="2" />
-              <path d="M8 21H5a2 2 0 0 1-2-2v-3" className="stroke-indigo-500" strokeWidth="2" />
+              <path d="M3 8V5a2 2 0 0 1 2-2h3" className="stroke-cyan-500" strokeWidth="2" />
+              <path d="M16 3h3a2 2 0 0 1 2 2v3" className="stroke-cyan-500" strokeWidth="2" />
+              <path d="M21 16v3a2 2 0 0 1-2 2h-3" className="stroke-cyan-500" strokeWidth="2" />
+              <path d="M8 21H5a2 2 0 0 1-2-2v-3" className="stroke-cyan-500" strokeWidth="2" />
 
               {/* Shutter Blades forming circular core */}
-              <circle cx="12" cy="12" r="5" stroke="currentColor" strokeWidth="1" className="stroke-indigo-400/40" />
-              <path d="M12 7c2.76 0 5 2.24 5 5" className="stroke-indigo-400" />
-              <path d="M17 12c0 2.76-2.24 5-5 5" className="stroke-indigo-400" />
-              <path d="M12 17c-2.76 0-5-2.24-5-5" className="stroke-indigo-400" />
-              <path d="M7 12c0-2.76 2.24-5 5-5" className="stroke-indigo-400" />
+              <circle cx="12" cy="12" r="5" stroke="currentColor" strokeWidth="1" className="stroke-cyan-400/40" />
+              <path d="M12 7c2.76 0 5 2.24 5 5" className="stroke-cyan-400" />
+              <path d="M17 12c0 2.76-2.24 5-5 5" className="stroke-cyan-400" />
+              <path d="M12 17c-2.76 0-5-2.24-5-5" className="stroke-cyan-400" />
+              <path d="M7 12c0-2.76 2.24-5 5-5" className="stroke-cyan-400" />
 
               {/* Abstract overlapping tech face lines */}
-              <path d="M9 11a3 3 0 0 1 6 0" className="stroke-indigo-300" strokeWidth="2" />
-              <path d="M12 11v2" className="stroke-indigo-300" strokeWidth="2" />
-              <path d="M8 17a4 4 0 0 1 8 0" className="stroke-indigo-300" strokeWidth="2" />
+              <path d="M9 11a3 3 0 0 1 6 0" className="stroke-cyan-300" strokeWidth="2" />
+              <path d="M12 11v2" className="stroke-cyan-300" strokeWidth="2" />
+              <path d="M8 17a4 4 0 0 1 8 0" className="stroke-cyan-300" strokeWidth="2" />
 
               {/* Scanner target line */}
-              <line x1="2" y1="12" x2="22" y2="12" className="stroke-violet-500/60" strokeWidth="1" strokeDasharray="2 2" />
+              <line x1="2" y1="12" x2="22" y2="12" className="stroke-sky-500/60" strokeWidth="1" strokeDasharray="2 2" />
             </svg>
           </div>
           <h1 className="text-3xl font-black text-gradient tracking-tight">Visiora</h1>
@@ -150,8 +150,8 @@ export default function Login() {
         </div>
 
         {/* Card */}
-        <div className="card-glass shadow-2xl relative overflow-hidden border border-slate-700/40">
-          <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-indigo-500/40 to-transparent" />
+        <div className="card-glass shadow-2xl relative overflow-hidden border border-cyan-900/30">
+          <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-cyan-500/40 to-transparent" />
           
           <h2 className="text-xl font-bold text-slate-100 mb-6">Sign In</h2>
 
@@ -171,7 +171,7 @@ export default function Login() {
                   type="email"
                   value={form.email}
                   onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                  className="input pl-10 bg-slate-900/60 focus:bg-slate-900/90 border border-slate-700/50 focus:border-indigo-500/50"
+                  className="input pl-10 bg-slate-900/60 focus:bg-slate-900/90 border border-slate-700/50 focus:border-cyan-500/50"
                   placeholder="name@example.com"
                   required
                   autoComplete="email"
@@ -188,7 +188,7 @@ export default function Login() {
                   type={showPw ? 'text' : 'password'}
                   value={form.password}
                   onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-                  className="input pl-10 pr-10 bg-slate-900/60 focus:bg-slate-900/90 border border-slate-700/50 focus:border-indigo-500/50"
+                  className="input pl-10 pr-10 bg-slate-900/60 focus:bg-slate-900/90 border border-slate-700/50 focus:border-cyan-500/50"
                   placeholder="••••••••"
                   required
                   autoComplete="current-password"
@@ -207,7 +207,7 @@ export default function Login() {
               id="login-submit"
               type="submit"
               disabled={loading}
-              className="btn-primary w-full py-3 text-base mt-2 shadow-lg shadow-indigo-600/20 active:scale-[0.98]"
+              className="btn-primary w-full py-3 text-base mt-2 shadow-lg shadow-cyan-600/20 active:scale-[0.98]"
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">

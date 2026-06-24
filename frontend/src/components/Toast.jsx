@@ -12,7 +12,7 @@ const COLORS = {
   success: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
   error: 'border-rose-500/40 bg-rose-500/10 text-rose-300',
   warning: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
-  info: 'border-indigo-500/40 bg-indigo-500/10 text-indigo-300',
+  info: 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300',
 }
 
 export function Toast({ message, type = 'info', onClose, duration = 4000 }) {

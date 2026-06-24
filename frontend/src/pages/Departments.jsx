@@ -93,14 +93,14 @@ export default function Departments() {
       {/* List */}
       {loading ? (
         <div className="flex justify-center py-10">
-          <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          <div className="w-6 h-6 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
         </div>
       ) : (
         <div className="space-y-2">
           {depts.map(dept => (
             <div key={dept.id} className="card py-3 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-indigo-600/20 border border-indigo-500/20 flex items-center justify-center flex-shrink-0">
-                <Building2 size={18} className="text-indigo-400" />
+              <div className="w-10 h-10 rounded-xl bg-cyan-600/15 border border-cyan-500/20 flex items-center justify-center flex-shrink-0">
+                <Building2 size={18} className="text-cyan-400" />
               </div>
               {editing?.id === dept.id ? (
                 <div className="flex-1 flex gap-2">
