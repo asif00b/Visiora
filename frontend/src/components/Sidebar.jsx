@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
   LayoutDashboard, Users, Camera, ClipboardList, Settings, LogOut, X, ShieldCheck,
-  Clock, Building2, HelpCircle
+  Clock, Building2, HelpCircle, UserCheck
 } from 'lucide-react'
 
 const NavItem = ({ to, icon: Icon, label, onClick }) => (
@@ -76,6 +76,7 @@ export default function Sidebar({ onClose }) {
             <NavItem to="/sessions" icon={Clock} label="Sessions" onClick={close} />
             <NavItem to="/departments" icon={Building2} label="Departments" onClick={close} />
             <NavItem to="/admin/unknown-faces" icon={HelpCircle} label="Unknown Faces" onClick={close} />
+            <NavItem to="/admin/profile-requests" icon={UserCheck} label="Approval Requests" onClick={close} />
             <NavItem to="/admin/config" icon={Settings} label="Settings" onClick={close} />
           </NavSection>
         )}

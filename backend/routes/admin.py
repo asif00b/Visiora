@@ -6,7 +6,9 @@ from flask_jwt_extended import jwt_required
 from database import db, db_health_check
 from models.unknown_face import UnknownFace, SystemConfig
 from models.user import User
-from utils.auth_helpers import require_role
+from models.profile_change_request import ProfileChangeRequest
+from utils.auth_helpers import require_role, get_current_user
+from datetime import datetime
 
 admin_bp = Blueprint('admin', __name__)
 logger   = logging.getLogger(__name__)
@@ -301,6 +303,17 @@ def storage_cleanup():
                 if uid not in valid_ids:
                     fpath = os.path.join(known_dir, fname)
                     try:
+                        if fname.startswith('pending_profile_'):
+                            # Safeguard active pending change requests from being deleted
+                            try:
+                                user_id_str = fname.replace('pending_profile_', '').split('.')[0]
+                                user_id = int(user_id_str)
+                                exists = ProfileChangeRequest.query.filter_by(user_id=user_id, status='pending').first()
+                                if exists:
+                                    continue
+                            except Exception:
+                                pass
+                        
                         bytes_freed += os.path.getsize(fpath)
                         os.remove(fpath)
                         deleted += 1
@@ -506,3 +519,125 @@ def _delete_file_safe(image_path: str, base_dir: str):
             os.remove(fpath)
     except Exception:
         pass
+
+
+# ── Profile Change Requests ───────────────────────────────────────────────────
+
+@admin_bp.route('/admin/profile-requests', methods=['GET'])
+@jwt_required()
+@require_role('admin')
+def list_profile_requests():
+    try:
+        status = request.args.get('status', 'pending')
+        query = ProfileChangeRequest.query
+        if status:
+            query = query.filter_by(status=status)
+        requests = query.order_by(ProfileChangeRequest.created_at.desc()).all()
+        return jsonify({
+            'success': True,
+            'requests': [r.to_dict() for r in requests]
+        }), 200
+    except Exception as e:
+        logger.error(f'[ProfileRequests] GET error: {e}')
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@admin_bp.route('/admin/profile-requests/<int:rid>/approve', methods=['POST'])
+@jwt_required()
+@require_role('admin')
+def approve_profile_request(rid):
+    try:
+        req = ProfileChangeRequest.query.get_or_404(rid)
+        if req.status != 'pending':
+            return jsonify({'success': False, 'message': 'Request is already processed'}), 400
+
+        user = User.query.get(req.user_id)
+        if not user:
+            return jsonify({'success': False, 'message': 'User not found'}), 404
+
+        current_user = get_current_user()
+
+        # Apply changes to user profile
+        if req.requested_name:
+            user.name = req.requested_name
+        if req.requested_phone:
+            user.phone = req.requested_phone
+        
+        # Handle profile photo move from pending to active
+        if req.requested_image_path:
+            known_dir = current_app.config['KNOWN_FACES_DIR']
+            pending_filename = os.path.basename(req.requested_image_path)
+            pending_filepath = os.path.join(known_dir, pending_filename)
+
+            new_filename = f'profile_{user.id}.jpg'
+            new_filepath = os.path.join(known_dir, new_filename)
+
+            if os.path.exists(pending_filepath):
+                import shutil
+                shutil.move(pending_filepath, new_filepath)
+                user.image_path = f'known_faces/{new_filename}'
+
+        # Update request status
+        req.status = 'approved'
+        req.reviewed_by = current_user.id
+        req.reviewed_at = datetime.now()
+
+        # Commit DB changes
+        db.session.commit()
+
+        # Reload face cache if name changed
+        if req.requested_name:
+            try:
+                from face_engine.engine_factory import get_engine
+                from models.face_encoding import FaceEncoding
+                import numpy as np
+                engine = get_engine()
+                engine.remove_from_cache(user.id)
+                encs = FaceEncoding.query.filter_by(user_id=user.id).all()
+                if encs:
+                    saved_encodings = [np.array(e.get_encoding()) for e in encs]
+                    engine.add_to_cache(user.id, user.name, saved_encodings[0])
+                    if len(saved_encodings) > 1:
+                        engine.add_encodings_to_cache(user.id, user.name, saved_encodings[1:])
+            except Exception as e:
+                logger.warning(f'[ProfileRequests] Face cache reload failed: {e}')
+
+        return jsonify({'success': True, 'message': 'Profile change request approved'}), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f'[ProfileRequests] Approve error: {e}')
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@admin_bp.route('/admin/profile-requests/<int:rid>/reject', methods=['POST'])
+@jwt_required()
+@require_role('admin')
+def reject_profile_request(rid):
+    try:
+        req = ProfileChangeRequest.query.get_or_404(rid)
+        if req.status != 'pending':
+            return jsonify({'success': False, 'message': 'Request is already processed'}), 400
+
+        data = request.get_json() or {}
+        reason = data.get('reason', '').strip()
+
+        current_user = get_current_user()
+
+        # Clean up temporary pending image file if any
+        if req.requested_image_path:
+            known_dir = current_app.config['KNOWN_FACES_DIR']
+            _delete_file_safe(req.requested_image_path, known_dir)
+
+        # Update request status
+        req.status = 'rejected'
+        req.rejection_reason = reason
+        req.reviewed_by = current_user.id
+        req.reviewed_at = datetime.now()
+
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'Profile change request rejected'}), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f'[ProfileRequests] Reject error: {e}')
+        return jsonify({'success': False, 'message': str(e)}), 500
+

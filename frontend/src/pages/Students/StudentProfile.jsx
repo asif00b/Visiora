@@ -12,7 +12,7 @@ import ConfirmModal from '../../components/ConfirmModal'
 import { ToastContainer, useToast } from '../../components/Toast'
 import {
   User, Camera, ClipboardList, Save, Trash2,
-  Award, MapPin, Phone, Mail, Hash, Shield, Star
+  Award, MapPin, Phone, Mail, Hash, Shield, Star, AlertCircle
 } from 'lucide-react'
 
 const TABS = ['Profile', 'Attendance', 'Face Management']
@@ -80,7 +80,7 @@ export default function StudentProfile() {
     }
     setSaving(true)
     try {
-      await updateUser(id, {
+      const res = await updateUser(id, {
         name:       editForm.name,
         email:      editForm.email,
         phone:      editForm.phone,
@@ -88,9 +88,14 @@ export default function StudentProfile() {
         student_id: editForm.student_id,
         image_b64:  editForm.image_b64,
       })
-      toast.success('Profile updated')
+      if (res.data.pending) {
+        toast.success(res.data.message || 'Profile changes submitted for admin approval')
+      } else {
+        toast.success('Profile updated')
+      }
       const ur = await getUser(id)
       setUser(ur.data.user)
+      setEditForm(ur.data.user)
       setImagePreview(null)
     } catch (err) {
       toast.error(err.response?.data?.message || 'Update failed')
@@ -157,6 +162,31 @@ export default function StudentProfile() {
   return (
     <div className="space-y-6 animate-fade-in max-w-5xl">
       <ToastContainer toasts={toasts} removeToast={removeToast} />
+
+      {/* Alert banner if there's a pending change request */}
+      {user.pending_profile_request && (
+        <div className="card-glass border-amber-500/25 bg-amber-500/5 px-5 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex gap-3">
+            <AlertCircle className="text-amber-500 flex-shrink-0 mt-0.5" size={20} />
+            <div>
+              <h3 className="text-sm font-bold text-amber-500">Profile Changes Pending Approval</h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                You have requested changes to your profile (
+                {[
+                  user.pending_profile_request.requested_name !== user.name ? 'Name' : null,
+                  user.pending_profile_request.requested_phone !== user.phone ? 'Phone' : null,
+                  user.pending_profile_request.requested_image_path ? 'Photo' : null
+                ].filter(Boolean).join(', ')}
+                ) which are currently awaiting administrator review.
+              </p>
+            </div>
+          </div>
+          <span className="text-[10px] uppercase font-bold text-amber-500/80 bg-amber-500/10 border border-amber-500/25 px-2.5 py-1 rounded-full flex-shrink-0">
+            Awaiting Admin Review
+          </span>
+        </div>
+      )}
+
       {confirmDeleteFace && (
         <ConfirmModal
           title="Delete Face Encodings"

@@ -4,6 +4,7 @@ from models.face_encoding import FaceEncoding
 from models.session_model import SessionModel
 from models.attendance import Attendance
 from models.unknown_face import UnknownFace, SystemConfig
+from models.profile_change_request import ProfileChangeRequest
 
 __all__ = [
     'User',
@@ -13,4 +14,6 @@ __all__ = [
     'Attendance',
     'UnknownFace',
     'SystemConfig',
+    'ProfileChangeRequest',
 ]
+

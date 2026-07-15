@@ -7,7 +7,9 @@ import bcrypt
 from database import db
 from models.user import User
 from models.department import Department
+from models.profile_change_request import ProfileChangeRequest
 from utils.auth_helpers import require_role, require_auth, get_current_user
+from datetime import datetime
 
 users_bp = Blueprint('users', __name__)
 
@@ -36,7 +38,10 @@ def get_user(uid):
         return jsonify({'success': False, 'message': 'Access denied'}), 403
 
     user = User.query.get_or_404(uid)
-    return jsonify({'success': True, 'user': user.to_dict()}), 200
+    user_dict = user.to_dict()
+    pending_req = ProfileChangeRequest.query.filter_by(user_id=uid, status='pending').first()
+    user_dict['pending_profile_request'] = pending_req.to_dict() if pending_req else None
+    return jsonify({'success': True, 'user': user_dict}), 200
 
 
 @users_bp.route('/users', methods=['POST'])
@@ -105,6 +110,47 @@ def update_user(uid):
     if current.role == 'student':
         for forbidden in ['email', 'password', 'role', 'student_id', 'is_active', 'dept_id']:
             data.pop(forbidden, None)
+
+        if 'phone' in data:
+            phone = data['phone']
+            if phone:
+                import re
+                if not re.match(r'^01\d{9}$', str(phone)):
+                    return jsonify({'success': False, 'message': 'Phone must be an 11-digit Bangladeshi number starting with 01'}), 400
+
+        # Handle student changes via ProfileChangeRequest approval queue
+        pending_req = ProfileChangeRequest.query.filter_by(user_id=uid, status='pending').first()
+        
+        req_img_path = None
+        if data.get('image_b64'):
+            try:
+                req_img_path = _save_pending_profile_image(uid, data['image_b64'])
+            except Exception as e:
+                return jsonify({'success': False, 'message': f'Failed to process profile picture: {e}'}), 500
+        elif pending_req:
+            req_img_path = pending_req.requested_image_path
+
+        if pending_req:
+            pending_req.requested_name = data.get('name', pending_req.requested_name)
+            pending_req.requested_phone = data.get('phone', pending_req.requested_phone)
+            pending_req.requested_image_path = req_img_path
+            pending_req.created_at = datetime.now()
+        else:
+            pending_req = ProfileChangeRequest(
+                user_id=uid,
+                requested_name=data.get('name', user.name),
+                requested_phone=data.get('phone', user.phone),
+                requested_image_path=req_img_path,
+                status='pending'
+            )
+            db.session.add(pending_req)
+        
+        db.session.commit()
+        return jsonify({
+            'success': True,
+            'message': 'Your profile changes have been submitted for admin approval.',
+            'pending': True
+        }), 202
 
     if 'name' in data:
         user.name = data['name']
@@ -183,3 +229,26 @@ def _save_profile_image(user: User, b64_string: str):
         db.session.commit()
     except Exception as e:
         current_app.logger.error(f'Profile image save error: {e}')
+
+
+def _save_pending_profile_image(uid: int, b64_string: str) -> str:
+    """Save base64 profile image to disk as a pending image and return its relative path."""
+    try:
+        known_dir = current_app.config['KNOWN_FACES_DIR']
+        os.makedirs(known_dir, exist_ok=True)
+
+        if ',' in b64_string:
+            b64_string = b64_string.split(',', 1)[1]
+
+        image_bytes = base64.b64decode(b64_string)
+        filename = f'pending_profile_{uid}.jpg'
+        filepath = os.path.join(known_dir, filename)
+
+        with open(filepath, 'wb') as f:
+            f.write(image_bytes)
+
+        return f'known_faces/{filename}'
+    except Exception as e:
+        current_app.logger.error(f'Pending profile image save error: {e}')
+        raise e
+

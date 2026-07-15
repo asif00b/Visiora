@@ -132,6 +132,7 @@ def _validate_schema():
         "departments",
         "unknown_faces",
         "system_config",
+        "profile_change_requests",
     }
     missing = required - existing
     if missing:
