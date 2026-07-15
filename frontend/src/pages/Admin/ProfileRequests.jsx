@@ -73,6 +73,8 @@ export default function ProfileRequests() {
         <ConfirmModal
           title="Approve Profile Changes"
           message={`Are you sure you want to approve profile changes for ${confirmApprove.user_name}? This will update their profile immediately.`}
+          confirmLabel="Approve"
+          danger={false}
           onConfirm={handleApprove}
           onCancel={() => setConfirmApprove(null)}
         />
