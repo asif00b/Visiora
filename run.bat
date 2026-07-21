@@ -27,7 +27,7 @@ start "Visiora Frontend" cmd /k "cd /d %~dp0frontend && npm.cmd run dev"
 
 echo Launching web browser...
 timeout /t 2 /nobreak >nul
-start http://localhost:5173
+start https://localhost:5173
 
 echo.
 echo ============================================================
