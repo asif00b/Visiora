@@ -8,11 +8,11 @@ echo   Starting Visiora (Local)
 echo ============================================================
 echo.
 
-echo [1/3] Starting Backend (Python)...
+echo [1/2] Starting Backend (Python)...
 start "Visiora Backend" cmd /k "cd /d %~dp0backend && venv\Scripts\python app.py"
 
 echo.
-echo [2/3] Waiting for Backend to initialize and become active...
+echo [2/2] Waiting for Backend to initialize and become active...
 echo.
 
 :wait_backend
@@ -22,18 +22,9 @@ if %errorlevel% neq 0 (
     goto wait_backend
 )
 
-echo [3/3] Backend is live! Starting Frontend (Vite)...
-start "Visiora Frontend" cmd /k "cd /d %~dp0frontend && npm.cmd run dev"
-
 echo Launching web browser...
-timeout /t 2 /nobreak >nul
 start https://localhost:5173
 
-echo.
-echo ============================================================
-echo   System is launching! 
-echo   Feel free to close this main setup window.
-echo   Keep the other two background command windows open.
-echo ============================================================
-echo.
-pause
+echo Backend is live! Starting Frontend (Vite)...
+cd /d "%~dp0frontend"
+npm.cmd run dev
