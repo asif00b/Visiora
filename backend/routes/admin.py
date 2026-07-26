@@ -528,9 +528,9 @@ def _delete_file_safe(image_path: str, base_dir: str):
 @require_role('admin')
 def list_profile_requests():
     try:
-        status = request.args.get('status', 'pending')
+        status = request.args.get('status', 'all')
         query = ProfileChangeRequest.query
-        if status:
+        if status and status.lower() != 'all':
             query = query.filter_by(status=status)
         requests = query.order_by(ProfileChangeRequest.created_at.desc()).all()
         return jsonify({
