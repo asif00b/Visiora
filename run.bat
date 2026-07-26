@@ -22,9 +22,6 @@ if %errorlevel% neq 0 (
     goto wait_backend
 )
 
-echo Launching web browser...
-start http://localhost:5173
-
 echo Backend is live! Starting Frontend (Vite)...
 cd /d "%~dp0frontend"
 npm.cmd run dev
