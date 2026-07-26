@@ -46,7 +46,9 @@ DB_BACKEND = _db_backend(DATABASE_URL)
 
 
 class Config:
-    SECRET_KEY = os.environ.get("SECRET_KEY", "change-this-secret-abc123xyz!")
+    SECRET_KEY = os.environ.get(
+        "SECRET_KEY", "visiora-attendance-system-flask-secret-key-2026-super-secure-key-9988776655"
+    )
 
     SQLALCHEMY_DATABASE_URI = DATABASE_URL
     SQLALCHEMY_TRACK_MODIFICATIONS = False
@@ -61,7 +63,7 @@ class Config:
     }
 
     JWT_SECRET_KEY = os.environ.get(
-        "JWT_SECRET_KEY", "nub-attendance-jwt-secret-key-2026-secure!"
+        "JWT_SECRET_KEY", "visiora-attendance-system-jwt-secret-key-2026-super-secure-key-9988776655"
     )
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=8)
 

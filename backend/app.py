@@ -112,6 +112,7 @@ def create_app():
     app.register_blueprint(train_bp,          url_prefix=prefix)
     app.register_blueprint(face_quality_bp,   url_prefix=prefix)
 
+
     # ── Static file serving (profile/face images) ────────────────────────────
     from config import STORAGE_DIR as _STORAGE_ROOT
 
@@ -152,5 +153,5 @@ if __name__ == '__main__':
     print('\n' + '=' * 55)
     print('  Visiora — Face Recognition Attendance System · Backend v6.1')
     print('  Running on http://localhost:5000')
-    print('=' * 55 + '\n')
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    is_debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
+    app.run(host='0.0.0.0', port=5000, debug=is_debug, use_reloader=is_debug)
