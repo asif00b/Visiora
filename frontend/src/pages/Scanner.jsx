@@ -702,8 +702,7 @@ export default function Scanner() {
               ref={videoRef}
               className="w-full h-full object-cover"
               style={{
-                transform: mirrored ? 'scaleX(-1)' : 'none',
-                filter: 'brightness(1.15) contrast(1.1)'
+                transform: mirrored ? 'scaleX(-1)' : 'none'
               }}
               muted
               playsInline
