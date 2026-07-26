@@ -23,7 +23,7 @@ if %errorlevel% neq 0 (
 )
 
 echo [3/3] Launching Public Tunnel (Cloudflare)...
-start "Visiora Public Tunnel" cmd /k "cloudflared tunnel --url http://localhost:5173"
+start "Visiora Public Tunnel" cmd /k "cloudflared tunnel --url https://localhost:5173 --no-tls-verify"
 
 echo.
 echo Backend is live! Starting Frontend (Vite)...
