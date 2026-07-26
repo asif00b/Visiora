@@ -23,7 +23,7 @@ if %errorlevel% neq 0 (
 )
 
 echo Launching web browser...
-start https://localhost:5173
+start http://localhost:5173
 
 echo Backend is live! Starting Frontend (Vite)...
 cd /d "%~dp0frontend"
