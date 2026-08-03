@@ -19,12 +19,12 @@ users_bp = Blueprint('users', __name__)
 @require_auth
 def list_users():
     current = get_current_user()
-    # Students can only see themselves
-    if current.role == 'student':
+    # General users can only see themselves
+    if current.role in ['user', 'student']:
         return jsonify({'success': True, 'users': [current.to_dict()]}), 200
 
     users = User.query.order_by(User.created_at.desc()).all()
-    # Hide default admin from user list
+    # Hide default system admin from user list if needed, or return all
     filtered_users = [u.to_dict() for u in users if u.email != 'admin@system.com']
     return jsonify({'success': True, 'users': filtered_users}), 200
 
@@ -34,7 +34,7 @@ def list_users():
 @require_auth
 def get_user(uid):
     current = get_current_user()
-    if current.role == 'student' and current.id != uid:
+    if current.role in ['user', 'student'] and current.id != uid:
         return jsonify({'success': False, 'message': 'Access denied'}), 403
 
     user = User.query.get_or_404(uid)
@@ -49,10 +49,14 @@ def get_user(uid):
 @require_role('admin', 'hr')
 def create_user():
     data = request.get_json()
-    required = ['name', 'email', 'password', 'role']
+    required = ['name', 'email', 'password']
     for field in required:
         if not data.get(field):
             return jsonify({'success': False, 'message': f'{field} is required'}), 400
+
+    role = data.get('role', 'user')
+    if role == 'student':
+        role = 'user'
 
     phone = data.get('phone')
     if phone:
@@ -62,7 +66,7 @@ def create_user():
 
     # HR cannot create admins
     current = get_current_user()
-    if current.role == 'hr' and data['role'] == 'admin':
+    if current.role == 'hr' and role == 'admin':
         return jsonify({'success': False, 'message': 'HR cannot create admin accounts'}), 403
 
     if User.query.filter_by(email=data['email'].lower()).first():
@@ -73,10 +77,11 @@ def create_user():
         name=data['name'],
         email=data['email'].lower().strip(),
         password_hash=pw_hash,
-        role=data['role'],
+        role=role,
         student_id=data.get('student_id') or None,
         phone=data.get('phone') or None,
         dept_id=data.get('dept_id') if data.get('dept_id') != '' else None,
+        weekly_target_hours=float(data.get('weekly_target_hours', 40.0)),
     )
     db.session.add(user)
     db.session.commit()
@@ -94,8 +99,8 @@ def create_user():
 def update_user(uid):
     current = get_current_user()
     
-    # Students can only update their own profile
-    if current.role == 'student' and current.id != uid:
+    # General users can only update their own profile
+    if current.role in ['user', 'student'] and current.id != uid:
         return jsonify({'success': False, 'message': 'Access denied'}), 403
 
     user = User.query.get_or_404(uid)
@@ -106,9 +111,9 @@ def update_user(uid):
 
     data = request.get_json() or {}
 
-    # Restrict student updates to only allow safe fields
-    if current.role == 'student':
-        for forbidden in ['email', 'password', 'role', 'student_id', 'is_active', 'dept_id']:
+    # Restrict general user updates to only allow safe fields
+    if current.role in ['user', 'student']:
+        for forbidden in ['email', 'password', 'role', 'student_id', 'is_active', 'dept_id', 'weekly_target_hours']:
             data.pop(forbidden, None)
 
         if 'phone' in data:
@@ -118,7 +123,7 @@ def update_user(uid):
                 if not re.match(r'^01\d{9}$', str(phone)):
                     return jsonify({'success': False, 'message': 'Phone must be an 11-digit Bangladeshi number starting with 01'}), 400
 
-        # Handle student changes via ProfileChangeRequest approval queue
+        # Handle user changes via ProfileChangeRequest approval queue
         pending_req = ProfileChangeRequest.query.filter_by(user_id=uid, status='pending').first()
         
         req_img_path = None
@@ -172,10 +177,24 @@ def update_user(uid):
         user.dept_id = data['dept_id'] if data['dept_id'] != '' else None
     if 'student_id' in data:
         user.student_id = data['student_id'] or None
+    if 'weekly_target_hours' in data:
+        try:
+            user.weekly_target_hours = float(data['weekly_target_hours'])
+        except Exception:
+            pass
     if 'is_active' in data:
         user.is_active = data['is_active']
     if 'role' in data and current.role == 'admin':
-        user.role = data['role']
+        new_role = data['role']
+        if new_role == 'student':
+            new_role = 'user'
+        if new_role in ['admin', 'user', 'hr']:
+            # Safety check: prevent demoting the last admin
+            if user.role == 'admin' and new_role != 'admin':
+                admin_count = User.query.filter_by(role='admin', is_active=True).count()
+                if admin_count <= 1:
+                    return jsonify({'success': False, 'message': 'Cannot demote the last remaining active Administrator'}), 400
+            user.role = new_role
     if 'password' in data and data['password']:
         user.password_hash = bcrypt.hashpw(data['password'].encode(), bcrypt.gensalt()).decode()
     if data.get('image_b64'):

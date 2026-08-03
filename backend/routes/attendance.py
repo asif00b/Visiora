@@ -127,7 +127,7 @@ def attendance_report():
 def user_attendance(uid):
     try:
         current = get_current_user()
-        if current.role == 'student' and current.id != uid:
+        if current.role in ['student', 'user'] and current.id != uid:
             return jsonify({'success': False, 'message': 'Access denied'}), 403
 
         User.query.get_or_404(uid)
@@ -206,7 +206,7 @@ def export_csv():
             try:
                 rows.append({
                     'ID':          r.id,
-                    'Student ID':  r.user.student_id  if r.user else '',
+                    'User ID':     r.user.student_id  if r.user else '',
                     'Name':        r.user.name        if r.user else '',
                     'Department':  r.user.department.name if r.user and r.user.department else '',
                     'Session':     r.session.name     if r.session else 'General',
@@ -219,7 +219,7 @@ def export_csv():
                 pass
 
         output = io.StringIO()
-        fields = ['ID', 'Student ID', 'Name', 'Department', 'Session', 'Date', 'Time', 'Status', 'Marked By']
+        fields = ['ID', 'User ID', 'Name', 'Department', 'Session', 'Date', 'Time', 'Status', 'Marked By']
         writer = csv.DictWriter(output, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
@@ -243,7 +243,7 @@ def export_csv():
 def attendance_stats():
     """Summary stats for dashboard."""
     try:
-        total_users  = User.query.filter_by(is_active=True, role='student').count()
+        total_users  = User.query.filter(User.is_active == True, User.role != 'admin').count()
         today_start  = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         today_count  = Attendance.query.filter(Attendance.timestamp >= today_start).count()
         total_records = Attendance.query.count()

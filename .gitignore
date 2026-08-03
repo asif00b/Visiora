@@ -34,3 +34,5 @@ storage/unknown_faces/*
 
 # Temporary deploy directories
 hf_deploy/
+.dist/
+*.tmp

@@ -9,6 +9,7 @@ import { UserPlus, Search, Trash2, Eye, Camera, AlertTriangle } from 'lucide-rea
 const ROLE_COLORS = {
   admin:   'badge-error',
   hr:      'badge-warning',
+  user:    'badge-info',
   student: 'badge-info',
 }
 
@@ -129,7 +130,7 @@ export default function StudentList() {
           <option value="">All Roles</option>
           <option value="admin">Admin</option>
           <option value="hr">HR</option>
-          <option value="student">Student</option>
+          <option value="user">User</option>
         </select>
 
         {/* No-face toggle */}
@@ -155,7 +156,7 @@ export default function StudentList() {
             <thead>
               <tr>
                 <th>Name</th>
-                <th>ID</th>
+                <th>User ID</th>
                 <th>Email</th>
                 <th>Department</th>
                 <th>Role</th>

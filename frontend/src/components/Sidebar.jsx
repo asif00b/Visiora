@@ -52,10 +52,13 @@ export default function Sidebar({ onClose }) {
         </button>
       </div>
 
-      {/* Nav — simplified to essential items only */}
+      {/* Nav — simplified & segregated for users and admins */}
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-4">
         <NavSection title="Main">
           <NavItem to="/dashboard" icon={LayoutDashboard} label="Dashboard" onClick={close} />
+          {!canManage && user && (
+            <NavItem to={`/students/${user.id}`} icon={Users} label="My Profile" onClick={close} />
+          )}
         </NavSection>
 
         {canManage && (

@@ -81,12 +81,14 @@ export default function StudentProfile() {
     setSaving(true)
     try {
       const res = await updateUser(id, {
-        name:       editForm.name,
-        email:      editForm.email,
-        phone:      editForm.phone,
-        dept_id:    editForm.dept_id,
-        student_id: editForm.student_id,
-        image_b64:  editForm.image_b64,
+        name:                editForm.name,
+        email:               editForm.email,
+        phone:               editForm.phone,
+        dept_id:             editForm.dept_id,
+        student_id:          editForm.student_id,
+        role:                editForm.role,
+        weekly_target_hours: editForm.weekly_target_hours,
+        image_b64:           editForm.image_b64,
       })
       if (res.data.pending) {
         toast.success(res.data.message || 'Profile changes submitted for admin approval')
@@ -389,7 +391,7 @@ export default function StudentProfile() {
                 />
               </div>
               <div>
-                <label className="label">Student / Staff ID</label>
+                <label className="label">User ID / Code</label>
                 <input
                   value={editForm.student_id || ''}
                   onChange={e => setEditForm(f => ({ ...f, student_id: e.target.value }))}
@@ -407,7 +409,7 @@ export default function StudentProfile() {
                   disabled={!(canManage || isOwnProfile)}
                 />
               </div>
-              <div className="col-span-2">
+              <div>
                 <label className="label">Department</label>
                 <select
                   value={editForm.dept_id || ''}
@@ -419,6 +421,33 @@ export default function StudentProfile() {
                   {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
               </div>
+              {canManage && (
+                <div>
+                  <label className="label">User Role</label>
+                  <select
+                    value={editForm.role === 'student' ? 'user' : (editForm.role || 'user')}
+                    onChange={e => setEditForm(f => ({ ...f, role: e.target.value }))}
+                    className="select"
+                    disabled={!isAdmin}
+                  >
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
+                    <option value="hr">HR</option>
+                  </select>
+                </div>
+              )}
+              {canManage && (
+                <div>
+                  <label className="label">Weekly Target Hours</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={editForm.weekly_target_hours || 40.0}
+                    onChange={e => setEditForm(f => ({ ...f, weekly_target_hours: e.target.value }))}
+                    className="input"
+                  />
+                </div>
+              )}
             </div>
             {(canManage || isOwnProfile) && (
               <button onClick={handleSave} disabled={saving} className="btn-primary">

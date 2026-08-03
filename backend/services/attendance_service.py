@@ -57,28 +57,43 @@ def mark_attendance_once(
     day = now.date()
     cooldown = _configured_cooldown(cooldown_seconds)
 
-    _reset_daily_cache_if_needed(day)
-    cache_key = (user_id, session_id, day)
     cooldown_key = (user_id, session_id)
 
     with _user_lock(user_id):
-        if cache_key in _marked_day_cache:
-            return {"marked": False, "reason": "already_marked_today", "attendance": None}
-
         now_mono = time.monotonic()
         last_mono = _last_marked_at.get(cooldown_key)
-        if last_mono and now_mono - last_mono < cooldown:
+        if last_mono and now_mono - last_mono < 10:  # 10s minimum between IN and OUT
             return {"marked": False, "reason": "cooldown", "attendance": None}
 
         existing = attendance_for_session(user_id, session_id, now=now)
+
         if existing:
-            _marked_day_cache.add(cache_key)
+            # Check if this is a Punch OUT update
+            if existing.timestamp:
+                duration_secs = (now - existing.timestamp).total_seconds()
+                duration_hrs = round(duration_secs / 3600.0, 2)
+                hours_str = f"{int(duration_secs // 3600)}h {int((duration_secs % 3600) // 60)}m"
+                existing.note = f"IN/OUT ({hours_str} logged)"
+                try:
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+
+                _last_marked_at[cooldown_key] = now_mono
+                return {
+                    "marked": True,
+                    "reason": "punch_out",
+                    "punch_type": "OUT",
+                    "hours_logged": duration_hrs,
+                    "attendance": existing,
+                }
             return {
                 "marked": False,
                 "reason": "already_marked_today",
                 "attendance": existing,
             }
 
+        # Punch IN (First scan of the day)
         record = Attendance(
             user_id=user_id,
             session_id=session_id,
@@ -86,7 +101,7 @@ def mark_attendance_once(
             timestamp=now,
             status=status,
             marked_by_id=marked_by_id,
-            note=note,
+            note=note or "IN (Punch In)",
         )
         try:
             db.session.add(record)
@@ -94,7 +109,6 @@ def mark_attendance_once(
         except IntegrityError:
             db.session.rollback()
             existing = attendance_for_session(user_id, session_id, now=now)
-            _marked_day_cache.add(cache_key)
             return {
                 "marked": False,
                 "reason": "already_marked_today",
@@ -105,9 +119,8 @@ def mark_attendance_once(
             raise
 
         _last_marked_at[cooldown_key] = now_mono
-        _marked_day_cache.add(cache_key)
         _prune_cooldown_cache(now_mono, cooldown)
-        return {"marked": True, "reason": "marked", "attendance": record}
+        return {"marked": True, "reason": "marked", "punch_type": "IN", "attendance": record}
 
 
 def _configured_cooldown(override):

@@ -47,7 +47,7 @@ export default function Dashboard() {
           ])
           if (sr) setStats(sr.data.stats)
           if (ir) setSysInfo(ir.data.info)
-        } else if (user?.role === 'student') {
+        } else if (user?.role === 'student' || user?.role === 'user') {
           const [ar, ss] = await Promise.all([
             getUserAttendance(user.id).catch(() => ({ data: { attendance: [] } })),
             getSessions().catch(() => ({ data: { sessions: [] } })),
@@ -163,9 +163,30 @@ export default function Dashboard() {
         </p>
       </div>
 
-      {/* Student view */}
-      {user?.role === 'student' && (
+      {/* General User view */}
+      {(!canManage || user?.role === 'user' || user?.role === 'student') && (
         <div className="space-y-6">
+          {/* Weekly Work Target Hours Card */}
+          <div className="card p-5 space-y-3 bg-gradient-to-r from-slate-900 via-slate-800 to-cyan-950/20">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Weekly Work Target (40 Hours/Week)</p>
+                <h3 className="text-xl font-bold text-slate-100 mt-1">
+                  {Math.min(user?.weekly_target_hours || 40, weekCount * 8)} / {user?.weekly_target_hours || 40} Hours Completed
+                </h3>
+              </div>
+              <span className="badge badge-success text-xs font-bold px-3 py-1">
+                {Math.min(100, Math.round(((weekCount * 8) / (user?.weekly_target_hours || 40)) * 100))}% Completed
+              </span>
+            </div>
+            <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+              <div
+                className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 rounded-full transition-all duration-500"
+                style={{ width: `${Math.min(100, Math.round(((weekCount * 8) / (user?.weekly_target_hours || 40)) * 100))}%` }}
+              />
+            </div>
+          </div>
+
           {/* Stats Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="card flex items-center justify-between p-4">
