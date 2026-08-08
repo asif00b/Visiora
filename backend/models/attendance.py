@@ -44,6 +44,9 @@ class Attendance(db.Model):
     status = db.Column(db.String(20), default="present")
     marked_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     note = db.Column(db.String(300), nullable=True)
+    punch_out = db.Column(db.DateTime, nullable=True)
+    hours_worked = db.Column(db.Float, default=0.0)
+    is_core_hours_satisfied = db.Column(db.Boolean, default=True, server_default=text('TRUE'))
 
     marked_by = db.relationship("User", foreign_keys=[marked_by_id])
 
@@ -63,6 +66,9 @@ class Attendance(db.Model):
             "status": self.status,
             "marked_by": self.marked_by.name if self.marked_by else "System",
             "note": self.note,
+            "punch_out": self.punch_out.isoformat() if self.punch_out else None,
+            "hours_worked": self.hours_worked or 0.0,
+            "is_core_hours_satisfied": self.is_core_hours_satisfied,
         }
 
     def safe_to_dict(self):
@@ -74,5 +80,8 @@ class Attendance(db.Model):
                 "user_id": self.user_id,
                 "timestamp": self.timestamp.isoformat() if self.timestamp else None,
                 "status": self.status,
+                "punch_out": self.punch_out.isoformat() if self.punch_out else None,
+                "hours_worked": self.hours_worked or 0.0,
+                "is_core_hours_satisfied": self.is_core_hours_satisfied,
                 "error": "serialization_error",
             }

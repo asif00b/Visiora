@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
   LayoutDashboard, Users, Camera, ClipboardList, Settings, LogOut, X, ShieldCheck,
-  Clock, Building2, HelpCircle, UserCheck
+  Clock, Building2, HelpCircle, UserCheck, Sliders
 } from 'lucide-react'
 
 const NavItem = ({ to, icon: Icon, label, onClick }) => (
@@ -71,6 +71,7 @@ export default function Sidebar({ onClose }) {
           <NavSection title="Attendance">
             <NavItem to="/scanner" icon={Camera} label="Scanner" onClick={close} />
             <NavItem to="/attendance/report" icon={ClipboardList} label="Reports" onClick={close} />
+            <NavItem to="/attendance/schedules" icon={Sliders} label="Targets & Schedules" onClick={close} />
           </NavSection>
         )}
 

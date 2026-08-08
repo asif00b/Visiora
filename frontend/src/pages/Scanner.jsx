@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useCamera } from '../hooks/useCamera'
 import { recognizeFace } from '../api/face'
 import { getActiveSessions } from '../api/sessions'
-import { Camera, CameraOff, Zap, UserCheck, Activity, Maximize2, Minimize2 } from 'lucide-react'
+import { verifyBiometricScan, pollHardwareSensor } from '../api/biometric'
+import { Camera, CameraOff, Zap, UserCheck, Activity, Maximize2, Minimize2, Fingerprint, ShieldCheck, RefreshCw } from 'lucide-react'
 // Estimate basic facial expression from 5 facial keypoints using geometry
 const estimateEmotion = (kpss) => {
   if (!kpss || kpss.length < 5) return 'Neutral'
@@ -421,13 +422,30 @@ export default function Scanner() {
       latestFacesRef.current = processed
       scanCount.current += 1  // Track real scan rate
 
+      if (processed.length > 0) {
+        lastMotionRef.current = Date.now()
+        setIsSleeping(false)
+      } else if (Date.now() - lastMotionRef.current > 7000) {
+        setIsSleeping(true)
+      }
+
       const newMarks = processed.filter(f => f.attendance_marked).length
       if (newMarks > 0) {
         setMarkedCount(prev => prev + newMarks)
         processed.filter(f => f.attendance_marked).forEach(f => {
-          const note = { id: Date.now() + Math.random(), name: f.name }
-          setNotifications(n => [note, ...n].slice(0, 4))
-          setTimeout(() => setNotifications(n => n.filter(x => x.id !== note.id)), 3500)
+          const note = { 
+            id: Date.now() + Math.random(), 
+            name: f.name,
+            photo: f.photo_url || f.image || f.photo || null,
+            punch_type: f.punch_type || 'IN',
+            method: 'Face',
+            time: new Date(),
+            student_id: f.student_id,
+            in_time: f.in_time,
+            out_time: f.out_time,
+            target_hours: f.target_hours
+          }
+          setNotifications(n => [note, ...n].slice(0, 5))
         })
       }
     } catch {
@@ -588,12 +606,132 @@ export default function Scanner() {
     return () => clearInterval(intervalRef.current)
   }, [scanning, isActive, doScan])
 
+  const [isSleeping, setIsSleeping] = useState(false)
+  const lastMotionRef = useRef(Date.now())
+  const [bioScanning, setBioScanning] = useState(false)
+  const [bioMessage, setBioMessage] = useState('')
+  const [livePreviewSrc, setLivePreviewSrc] = useState(null)
+  const [sensorTouch, setSensorTouch] = useState(false)
+  const [visualizerError, setVisualizerError] = useState('')
+  const [waitingForLift, setWaitingForLift] = useState(false)
+  const isBioPollingRef = useRef(false)
+
+  const scanningRef = useRef(scanning)
+  useEffect(() => {
+    scanningRef.current = scanning
+  }, [scanning])
+
+  // Continuous Biometric Verification Loop while scanner is running
+  useEffect(() => {
+    if (!scanning) {
+      setBioMessage('')
+      setLivePreviewSrc(null)
+      setSensorTouch(false)
+      return
+    }
+
+    let isMounted = true
+
+    const runLoop = async () => {
+      // Small initial delay before starting loop
+      await new Promise(r => setTimeout(r, 500))
+
+      while (isMounted && scanningRef.current) {
+        setSensorTouch(false)
+        setBioMessage('Waiting for finger touch...')
+        
+        try {
+          // Call verify endpoint (which blocks in backend waiting for finger touch)
+          const scanRes = await verifyBiometricScan({
+            session_id: selectedSession || null
+          })
+
+          if (!isMounted || !scanningRef.current) break
+
+          if (scanRes.data.matched) {
+            setSensorTouch(true)
+            
+            // Play double success beep
+            try {
+              const ctx = new (window.AudioContext || window.webkitAudioContext)()
+              const playBeep = (freq, delay, dur) => {
+                const osc = ctx.createOscillator()
+                const g = ctx.createGain()
+                osc.type = 'sine'
+                osc.frequency.value = freq
+                g.gain.value = 0.08
+                osc.connect(g)
+                g.connect(ctx.destination)
+                osc.start(ctx.currentTime + delay)
+                osc.stop(ctx.currentTime + delay + dur)
+              }
+              playBeep(880, 0, 0.1)
+              playBeep(880, 0.15, 0.1)
+            } catch {}
+
+            setBioMessage(`✓ Attendance Verified: ${scanRes.data.user.name} (${scanRes.data.punch_type})`)
+            setMarkedCount(c => c + 1)
+            setNotifications(prev => [
+              {
+                id: Date.now(),
+                name: scanRes.data.user.name,
+                photo: scanRes.data.user?.photo_url || scanRes.data.user?.image_path || null,
+                punch_type: scanRes.data.punch_type || 'IN',
+                method: 'Fingerprint',
+                time: new Date(),
+                student_id: scanRes.data.user.student_id,
+                in_time: scanRes.data.in_time,
+                out_time: scanRes.data.out_time,
+                target_hours: scanRes.data.target_hours
+              },
+              ...prev.slice(0, 4)
+            ])
+
+            // Let the user see the success message for 2.5 seconds before starting the next scan
+            await new Promise(r => setTimeout(r, 2500))
+          } else {
+            // Play failure tone if it was a real non-match (not a simple timeout)
+            if (scanRes.data.message && !scanRes.data.message.includes('timed out') && !scanRes.data.message.includes('No matching fingerprint')) {
+              try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)()
+                const osc = ctx.createOscillator()
+                const g = ctx.createGain()
+                osc.type = 'sawtooth'
+                osc.frequency.value = 220
+                g.gain.value = 0.1
+                osc.connect(g)
+                g.connect(ctx.destination)
+                osc.start()
+                osc.stop(ctx.currentTime + 0.25)
+              } catch {}
+            }
+            setBioMessage(scanRes.data.message || 'No match found. Try again.')
+            // Settle time before retrying
+            await new Promise(r => setTimeout(r, 1000))
+          }
+        } catch (err) {
+          if (!isMounted || !scanningRef.current) break
+          const errMsg = err.response?.data?.message || err.message || 'Futronic sensor offline.'
+          setBioMessage(errMsg)
+          await new Promise(r => setTimeout(r, 1500))
+        }
+      }
+    }
+
+    runLoop()
+
+    return () => {
+      isMounted = false
+    }
+  }, [scanning, selectedSession])
+
   return (
-    <div className="space-y-4 animate-fade-in">
-      <div>
-        <h1 className="section-title">Scanner</h1>
-        <p className="section-subtitle">Face recognition attendance</p>
-      </div>
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in">
+      <div className="lg:col-span-2 space-y-4">
+        <div>
+          <h1 className="section-title">Attendance Scanner</h1>
+          <p className="section-subtitle">Real-time Biometric Attendance System</p>
+        </div>
 
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
         <select
@@ -721,9 +859,21 @@ export default function Scanner() {
           )}
 
           {scanning && (
-            <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/60 backdrop-blur-sm rounded-full px-3 py-1.5">
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-              <span className="text-xs font-semibold text-white">LIVE</span>
+            <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/60 backdrop-blur-sm rounded-full px-3 py-1.5 z-20">
+              <span className={`w-2 h-2 rounded-full ${isSleeping ? 'bg-amber-400 animate-ping' : 'bg-red-500 animate-pulse'}`} />
+              <span className="text-xs font-semibold text-white">{isSleeping ? 'STANDBY' : 'LIVE SCANNER'}</span>
+            </div>
+          )}
+
+          {scanning && isSleeping && (
+            <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-[2px] flex flex-col items-center justify-center pointer-events-none animate-fade-in z-10">
+              <div className="p-4 rounded-2xl bg-slate-900/90 border border-cyan-500/30 text-center space-y-2 max-w-xs shadow-2xl">
+                <div className="w-12 h-12 mx-auto rounded-full bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+                  <Activity size={24} className="animate-pulse" />
+                </div>
+                <h4 className="text-sm font-bold text-slate-100 uppercase tracking-wider">System Standby</h4>
+                <p className="text-xs text-slate-400">Approach camera to activate</p>
+              </div>
             </div>
           )}
 
@@ -735,22 +885,103 @@ export default function Scanner() {
             {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
           </button>
 
-          <div className="absolute top-4 right-4 flex flex-col gap-2 z-10">
-            {notifications.map(n => (
-              <div key={n.id} className="flex items-center gap-2 bg-emerald-950/90 border border-emerald-700/50 backdrop-blur-sm text-emerald-300 text-sm font-medium px-4 py-2.5 rounded-xl shadow-lg animate-slide-up">
-                <Zap size={14} className="text-emerald-400" />
-                <span>{n.name}</span>
-              </div>
-            ))}
-          </div>
-
           {error && (
             <div className="absolute bottom-4 left-4 right-4 p-3 bg-rose-950/90 border border-rose-700/50 rounded-xl text-rose-300 text-sm">
               {error}
             </div>
           )}
+
+          {scanning && (
+            <div className="absolute bottom-4 left-4 z-20 flex flex-col items-start gap-2 max-w-[200px] pointer-events-none">
+              {livePreviewSrc && (
+                <div className="relative p-1 rounded-xl bg-slate-900/80 border-2 border-cyan-500/50 shadow-lg shadow-cyan-500/20 backdrop-blur-md animate-fade-in overflow-hidden">
+                  <div className="absolute inset-0 bg-cyan-500/20 animate-pulse pointer-events-none" />
+                  <img src={livePreviewSrc} alt="Live Fingerprint" className="w-20 h-[120px] object-cover rounded-lg filter contrast-125 sepia opacity-80 mix-blend-screen" />
+                </div>
+              )}
+              {(bioMessage || sensorTouch) && (
+                <div className="px-3 py-2 bg-slate-900/90 border border-cyan-500/30 rounded-lg shadow-lg backdrop-blur-sm flex items-center gap-2 animate-fade-in">
+                  <Fingerprint size={16} className={sensorTouch ? "text-cyan-400 animate-pulse" : "text-slate-400"} />
+                  <span className={`text-[10px] font-bold uppercase tracking-wider ${sensorTouch ? 'text-cyan-300' : 'text-slate-400'}`}>
+                    {bioMessage || (sensorTouch ? 'Scanning...' : 'Ready')}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
-    </div>
+      </div>
+
+        {/* Right Column: Attendance Feed */}
+        <div className="lg:col-span-1 flex flex-col lg:mt-24">
+          <div className="card p-4 bg-slate-900/80 border border-slate-700/50 flex-1 overflow-hidden flex flex-col">
+            <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-800">
+              <Activity className="text-cyan-400" size={18} />
+              <h2 className="text-sm font-bold text-slate-100 tracking-wide uppercase">Live Attendance Feed</h2>
+            </div>
+            <div className="flex-1 overflow-y-auto flex flex-col gap-4 pr-2" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+              {notifications.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2 opacity-50">
+                  <UserCheck size={32} />
+                  <p className="text-xs font-medium uppercase tracking-wider">Waiting for scans...</p>
+                </div>
+              ) : (
+                notifications.map((n, idx) => {
+                  const photoUrl = n.photo ? (n.photo.startsWith('http') || n.photo.startsWith('data:') ? n.photo : `/storage/${n.photo}`) : null;
+                  const inTimeStr = n.in_time ? new Date(n.in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
+                  const outTimeStr = n.out_time ? new Date(n.out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
+
+                  return (
+                  <div key={n.id} className="flex-shrink-0 flex items-center gap-5 p-5 bg-gradient-to-r from-slate-900/90 via-slate-800/80 to-slate-900/90 rounded-2xl border border-slate-700/60 shadow-xl backdrop-blur-md hover:border-cyan-500/40 transition-all animate-slide-up min-h-[110px]" style={{ animationDelay: `${idx * 50}ms` }}>
+                    <div className="relative flex-shrink-0">
+                      {photoUrl ? (
+                        <img 
+                          src={photoUrl} 
+                          alt={n.name} 
+                          className="w-20 h-20 rounded-2xl object-cover border-2 border-cyan-500/40 shadow-md shadow-cyan-500/10" 
+                        />
+                      ) : (
+                        <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-cyan-950 via-slate-800 to-slate-900 border-2 border-cyan-500/30 flex items-center justify-center text-cyan-400 font-extrabold text-3xl shadow-lg shadow-cyan-500/10">
+                          {n.name ? n.name.substring(0, 1).toUpperCase() : '?'}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex flex-col min-w-0">
+                          <h4 className="text-xl font-bold text-slate-100 truncate tracking-wide">{n.name}</h4>
+                          <span className="text-sm font-medium text-slate-400">ID: {n.student_id || 'N/A'}</span>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          <span className={`px-3 py-1 rounded-full text-xs font-extrabold tracking-wider border ${n.punch_type === 'IN' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30'}`}>
+                            {n.punch_type}
+                          </span>
+                          <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">{n.method}</span>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center justify-between pt-1 mt-1 border-t border-slate-800/50 text-xs font-medium">
+                        <div className="flex flex-col">
+                          <span className="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">IN Time</span>
+                          <span className="text-emerald-400 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />{inTimeStr}</span>
+                        </div>
+                        <div className="flex flex-col items-center">
+                          <span className="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">Target</span>
+                          <span className="text-cyan-400 font-bold">{n.target_hours || 40}h</span>
+                        </div>
+                        <div className="flex flex-col items-end">
+                          <span className="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">Left (Out Time)</span>
+                          <span className="text-amber-400 flex items-center gap-1.5">{outTimeStr}<span className="w-1.5 h-1.5 rounded-full bg-amber-400" /></span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )})
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
   )
 }

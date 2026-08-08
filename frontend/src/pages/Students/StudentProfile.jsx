@@ -5,17 +5,20 @@ import { getUser, updateUser } from '../../api/users'
 import { registerFace, deleteFaceEncodings } from '../../api/face'
 import { getUserAttendance } from '../../api/attendance'
 import { getDepartments } from '../../api/departments'
+import { enrollFingerprint, getUserFingerprints, deleteFingerprint } from '../../api/biometric'
 import GuidedCapture from '../../components/GuidedCapture'
 import DatasetUpload from '../../components/DatasetUpload'
 import AttendanceTable from '../../components/AttendanceTable'
 import ConfirmModal from '../../components/ConfirmModal'
+import BiometricEnrollModal from '../../components/BiometricEnrollModal'
 import { ToastContainer, useToast } from '../../components/Toast'
 import {
   User, Camera, ClipboardList, Save, Trash2,
-  Award, MapPin, Phone, Mail, Hash, Shield, Star, AlertCircle
+  Award, MapPin, Phone, Mail, Hash, Shield, ShieldCheck, Star, AlertCircle,
+  Fingerprint, CheckCircle2
 } from 'lucide-react'
 
-const TABS = ['Profile', 'Attendance', 'Face Management']
+const TABS = ['Profile', 'Attendance', 'Face Management', 'Biometric Fingerprint']
 
 const QUALITY_COLOR = (q) => {
   if (!q) return 'text-slate-500'
@@ -47,8 +50,19 @@ export default function StudentProfile() {
   const [editForm, setEditForm]          = useState({})
   const [imgError, setImgError]          = useState(false)
   const [imagePreview, setImagePreview]  = useState(null)
+  const [fingerprints, setFingerprints]  = useState([])
+  const [isEnrollModalOpen, setIsEnrollModalOpen] = useState(false)
 
   const isOwnProfile = me?.id === Number(id)
+
+  const loadFingerprints = async () => {
+    try {
+      const fr = await getUserFingerprints(id)
+      setFingerprints(fr.data.fingerprints || [])
+    } catch {
+      setFingerprints([])
+    }
+  }
 
   useEffect(() => {
     const load = async () => {
@@ -64,6 +78,7 @@ export default function StudentProfile() {
         setDepartments(dr.data.departments)
         setImgError(false)
         setImagePreview(null)
+        loadFingerprints()
       } catch {
         toast.error('Failed to load profile')
       } finally {
@@ -532,6 +547,89 @@ export default function StudentProfile() {
               <DatasetUpload userId={user.id} userName={user.name} />
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Biometric Fingerprint tab (Futronic FS80H) ────────────────────────── */}
+      {tab === 3 && (
+        <div className="card space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="font-bold text-slate-100 flex items-center gap-2">
+                <Fingerprint className="text-cyan-400" size={18} /> Futronic FS80H Biometric Hardware Registration
+              </h2>
+              <p className="text-xs text-slate-400 mt-1">
+                Register optical minutiae template from Futronic FS80H USB scanner for hardware attendance verification.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setIsEnrollModalOpen(true)}
+                className="btn-primary gap-2 text-xs py-2 px-4"
+              >
+                <Fingerprint size={15} /> Register Fingerprint
+              </button>
+            </div>
+          </div>
+
+          {/* 3-Step Interactive Futronic FS80H Hardware Enrollment Modal */}
+          <BiometricEnrollModal
+            userId={user?.id || id}
+            userName={user?.name || 'User'}
+            isOpen={isEnrollModalOpen}
+            onClose={() => setIsEnrollModalOpen(false)}
+            onSuccess={() => {
+              toast.success('Fingerprint registered successfully!')
+              loadFingerprints()
+            }}
+          />
+
+          <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-semibold text-slate-200">Enrolled Hardware Biometrics ({fingerprints.length})</span>
+              <span className="badge badge-success text-xs gap-1">
+                <CheckCircle2 size={12} /> Futronic FS80H Active
+              </span>
+            </div>
+            {fingerprints.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {fingerprints.map(fp => (
+                  <div key={fp.id} className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/50 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+                        <Fingerprint size={20} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-200">{fp.finger_name || 'Fingerprint'}</p>
+                        <p className="text-xs text-slate-500">Quality: {fp.quality_score || 85}% · ANSI 378</p>
+                      </div>
+                    </div>
+                    {canManage && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            await deleteFingerprint(fp.id)
+                            toast.success('Fingerprint removed')
+                            loadFingerprints()
+                          } catch {
+                            toast.error('Delete failed')
+                          }
+                        }}
+                        className="btn-icon text-rose-400 hover:bg-rose-500/10"
+                        title="Delete Fingerprint"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-6 text-slate-500 text-xs">
+                No fingerprints enrolled yet. Click "Enroll Fingerprint (FS80H)" above to register.
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

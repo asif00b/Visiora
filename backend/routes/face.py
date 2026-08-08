@@ -660,6 +660,18 @@ def recognize_face():
             'attendance_marked': False,
         }
 
+        # Fetch additional user details (student_id, photo)
+        if face.get('user_id') and str(face['user_id']) != 'Unknown':
+            from models.user import User
+            try:
+                u = User.query.get(int(face['user_id']))
+                if u:
+                    face_out['student_id'] = u.student_id
+                    face_out['photo_url'] = u.image_path
+                    face_out['target_hours'] = u.weekly_target_hours or 40.0
+            except Exception:
+                pass
+
         face_encoding = face_out.pop('_embedding', None)
 
         if face['matched'] and face.get('recognition_confirmed') and should_mark:
@@ -672,6 +684,13 @@ def recognize_face():
                     mark_result = mark_attendance_once(face['user_id'], session_id)
                     face_out['attendance_marked'] = mark_result['marked']
                     face_out['attendance_status'] = mark_result['reason']
+                    face_out['punch_type'] = mark_result.get('punch_type', 'IN')
+                    
+                    att = mark_result.get('attendance')
+                    if att:
+                        face_out['in_time'] = att.timestamp.isoformat() if att.timestamp else None
+                        face_out['out_time'] = att.punch_out.isoformat() if att.punch_out else None
+                        
                     if mark_result['marked'] or mark_result['reason'] in ('already_marked_today', 'cooldown'):
                         _session_marked_cache.add(cache_key)
                         

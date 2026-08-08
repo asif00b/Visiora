@@ -11,6 +11,7 @@ import StudentProfile from './pages/Students/StudentProfile'
 import Sessions from './pages/Sessions'
 import Departments from './pages/Departments'
 import AttendanceReport from './pages/Attendance/AttendanceReport'
+import Schedules from './pages/Admin/Schedules'
 import Scanner from './pages/Scanner'
 import AdminConfig from './pages/Admin/Config'
 import UnknownFaces from './pages/Admin/UnknownFaces'
@@ -28,7 +29,7 @@ export default function App() {
           <Route path="/login" element={<Login />} />
 
           {/* Protected */}
-          <Route element={<RoleGuard roles={['admin', 'hr', 'student']} />}>
+          <Route element={<RoleGuard roles={['admin', 'hr', 'student', 'user']} />}>
             <Route element={<Layout />}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />
@@ -39,6 +40,7 @@ export default function App() {
                 <Route path="/students" element={<StudentList />} />
                 <Route path="/students/register" element={<StudentRegister />} />
                 <Route path="/attendance/report" element={<AttendanceReport />} />
+                <Route path="/attendance/schedules" element={<Schedules />} />
                 <Route path="/scanner" element={<Scanner />} />
               </Route>
 

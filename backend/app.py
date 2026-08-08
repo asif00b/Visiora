@@ -100,6 +100,7 @@ def create_app():
     from routes.admin import admin_bp
     from routes.train import train_bp
     from routes.face_quality import face_quality_bp
+    from routes.biometric import biometric_bp
 
     prefix = '/api'
     app.register_blueprint(auth_bp,           url_prefix=prefix)
@@ -111,6 +112,7 @@ def create_app():
     app.register_blueprint(admin_bp,          url_prefix=prefix)
     app.register_blueprint(train_bp,          url_prefix=prefix)
     app.register_blueprint(face_quality_bp,   url_prefix=prefix)
+    app.register_blueprint(biometric_bp,      url_prefix=prefix)
 
 
     # ── Static file serving (profile/face images) ────────────────────────────

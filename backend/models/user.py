@@ -15,6 +15,9 @@ class User(db.Model):
     dept_id = db.Column(db.Integer, db.ForeignKey('departments.id'), nullable=True)
     image_path = db.Column(db.String(500), nullable=True)
     weekly_target_hours = db.Column(db.Float, default=40.0)
+    must_check_in_time = db.Column(db.Time, nullable=True)
+    must_be_in_start = db.Column(db.Time, nullable=True)
+    must_be_in_end = db.Column(db.Time, nullable=True)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
 
@@ -46,6 +49,9 @@ class User(db.Model):
             'dept_name': self.department.name if self.department else None,
             'image_path': self.image_path,
             'weekly_target_hours': self.weekly_target_hours or 40.0,
+            'must_check_in_time': self.must_check_in_time.strftime('%H:%M:%S') if self.must_check_in_time else None,
+            'must_be_in_start': self.must_be_in_start.strftime('%H:%M:%S') if self.must_be_in_start else None,
+            'must_be_in_end': self.must_be_in_end.strftime('%H:%M:%S') if self.must_be_in_end else None,
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'has_face': len(self.face_encodings) > 0,

@@ -59,13 +59,27 @@ def mark_attendance_once(
 
     cooldown_key = (user_id, session_id)
 
+    from models.user import User
+    user = User.query.get(user_id)
+
     with _user_lock(user_id):
         now_mono = time.monotonic()
         last_mono = _last_marked_at.get(cooldown_key)
-        if last_mono and now_mono - last_mono < 10:  # 10s minimum between IN and OUT
+        if last_mono and now_mono - last_mono < 600:  # 10 minutes (600s) minimum between IN and OUT
             return {"marked": False, "reason": "cooldown", "attendance": None}
 
         existing = attendance_for_session(user_id, session_id, now=now)
+
+        # Enforce check-in deadline and core hour start at punch-in
+        is_core_hours_satisfied = True
+        if user:
+            now_time = now.time()
+            if user.must_check_in_time and status == "present":
+                if now_time > user.must_check_in_time:
+                    status = "late"
+            if user.must_be_in_start:
+                if now_time > user.must_be_in_start:
+                    is_core_hours_satisfied = False
 
         if existing:
             # Check if this is a Punch OUT update
@@ -73,7 +87,16 @@ def mark_attendance_once(
                 duration_secs = (now - existing.timestamp).total_seconds()
                 duration_hrs = round(duration_secs / 3600.0, 2)
                 hours_str = f"{int(duration_secs // 3600)}h {int((duration_secs % 3600) // 60)}m"
+                
+                existing.punch_out = now
+                existing.hours_worked = duration_hrs
                 existing.note = f"IN/OUT ({hours_str} logged)"
+                
+                # Check core hour end at punch-out
+                if user and user.must_be_in_end:
+                    if now.time() < user.must_be_in_end:
+                        existing.is_core_hours_satisfied = False
+
                 try:
                     db.session.commit()
                 except Exception:
@@ -102,6 +125,7 @@ def mark_attendance_once(
             status=status,
             marked_by_id=marked_by_id,
             note=note or "IN (Punch In)",
+            is_core_hours_satisfied=is_core_hours_satisfied,
         )
         try:
             db.session.add(record)

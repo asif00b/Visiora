@@ -14,6 +14,20 @@ from datetime import datetime
 users_bp = Blueprint('users', __name__)
 
 
+def _parse_time_str(time_str):
+    if not time_str or str(time_str).strip() in ('', 'null', 'None'):
+        return None
+    try:
+        parts = str(time_str).split(':')
+        hr = int(parts[0])
+        mn = int(parts[1])
+        sc = int(parts[2]) if len(parts) > 2 else 0
+        from datetime import time as dt_time
+        return dt_time(hr, mn, sc)
+    except Exception:
+        raise ValueError(f"Invalid time format: {time_str}. Use HH:MM:SS or HH:MM")
+
+
 @users_bp.route('/users', methods=['GET'])
 @jwt_required()
 @require_auth
@@ -73,6 +87,13 @@ def create_user():
         return jsonify({'success': False, 'message': 'Email already exists'}), 409
 
     pw_hash = bcrypt.hashpw(data['password'].encode(), bcrypt.gensalt()).decode()
+    try:
+        check_in = _parse_time_str(data.get('must_check_in_time'))
+        in_start = _parse_time_str(data.get('must_be_in_start'))
+        in_end = _parse_time_str(data.get('must_be_in_end'))
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 400
+
     user = User(
         name=data['name'],
         email=data['email'].lower().strip(),
@@ -82,6 +103,9 @@ def create_user():
         phone=data.get('phone') or None,
         dept_id=data.get('dept_id') if data.get('dept_id') != '' else None,
         weekly_target_hours=float(data.get('weekly_target_hours', 40.0)),
+        must_check_in_time=check_in,
+        must_be_in_start=in_start,
+        must_be_in_end=in_end,
     )
     db.session.add(user)
     db.session.commit()
@@ -91,6 +115,68 @@ def create_user():
         _save_profile_image(user, data['image_b64'])
 
     return jsonify({'success': True, 'user': user.to_dict()}), 201
+
+
+@users_bp.route('/users/bulk-schedule', methods=['PUT'])
+@jwt_required()
+@require_role('admin', 'hr')
+def bulk_schedule_update():
+    """Bulk update schedules and targets for multiple users."""
+    try:
+        data = request.get_json() or {}
+        user_ids = data.get('user_ids')
+        dept_id = data.get('dept_id')
+        
+        weekly_target = data.get('weekly_target_hours')
+        must_check_in = data.get('must_check_in_time')
+        must_be_in_start = data.get('must_be_in_start')
+        must_be_in_end = data.get('must_be_in_end')
+
+        q = User.query
+        if user_ids is not None:
+            if not isinstance(user_ids, list):
+                return jsonify({'success': False, 'message': 'user_ids must be a list'}), 400
+            q = q.filter(User.id.in_(user_ids))
+        elif dept_id is not None and str(dept_id).strip() not in ('', 'all', 'null', 'None'):
+            q = q.filter(User.dept_id == int(dept_id))
+
+        users_to_update = q.all()
+        if not users_to_update:
+            return jsonify({'success': True, 'message': 'No users found matching filters', 'count': 0}), 200
+
+        parsed_check_in = _parse_time_str(must_check_in) if must_check_in is not None else None
+        parsed_in_start = _parse_time_str(must_be_in_start) if must_be_in_start is not None else None
+        parsed_in_end = _parse_time_str(must_be_in_end) if must_be_in_end is not None else None
+
+        updated_count = 0
+        for u in users_to_update:
+            if u.role == 'admin':
+                continue
+            
+            if weekly_target is not None:
+                u.weekly_target_hours = float(weekly_target) if weekly_target != '' else 40.0
+            
+            if must_check_in is not None:
+                u.must_check_in_time = parsed_check_in
+            if must_be_in_start is not None:
+                u.must_be_in_start = parsed_in_start
+            if must_be_in_end is not None:
+                u.must_be_in_end = parsed_in_end
+                
+            updated_count += 1
+
+        db.session.commit()
+        return jsonify({
+            'success': True,
+            'message': f'Successfully updated target and schedule settings for {updated_count} user(s).',
+            'count': updated_count
+        }), 200
+
+    except ValueError as ve:
+        return jsonify({'success': False, 'message': str(ve)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
 
 @users_bp.route('/users/<int:uid>', methods=['PUT'])
@@ -179,9 +265,24 @@ def update_user(uid):
         user.student_id = data['student_id'] or None
     if 'weekly_target_hours' in data:
         try:
-            user.weekly_target_hours = float(data['weekly_target_hours'])
+            user.weekly_target_hours = float(data['weekly_target_hours']) if data['weekly_target_hours'] != '' else 40.0
         except Exception:
             pass
+    if 'must_check_in_time' in data:
+        try:
+            user.must_check_in_time = _parse_time_str(data['must_check_in_time'])
+        except Exception as e:
+            return jsonify({'success': False, 'message': f'Invalid check-in time: {e}'}), 400
+    if 'must_be_in_start' in data:
+        try:
+            user.must_be_in_start = _parse_time_str(data['must_be_in_start'])
+        except Exception as e:
+            return jsonify({'success': False, 'message': f'Invalid must-be-in start time: {e}'}), 400
+    if 'must_be_in_end' in data:
+        try:
+            user.must_be_in_end = _parse_time_str(data['must_be_in_end'])
+        except Exception as e:
+            return jsonify({'success': False, 'message': f'Invalid must-be-in end time: {e}'}), 400
     if 'is_active' in data:
         user.is_active = data['is_active']
     if 'role' in data and current.role == 'admin':
@@ -202,6 +303,9 @@ def update_user(uid):
 
     db.session.commit()
     return jsonify({'success': True, 'user': user.to_dict()}), 200
+
+
+
 
 
 @users_bp.route('/users/<int:uid>', methods=['DELETE'])

@@ -49,11 +49,11 @@ export default function Dashboard() {
           if (ir) setSysInfo(ir.data.info)
         } else if (user?.role === 'student' || user?.role === 'user') {
           const [ar, ss] = await Promise.all([
-            getUserAttendance(user.id).catch(() => ({ data: { attendance: [] } })),
+            getUserAttendance(user?.id).catch(() => ({ data: { attendance: [] } })),
             getSessions().catch(() => ({ data: { sessions: [] } })),
           ])
-          setAllRecords(ar.data.attendance || [])
-          setSessions(ss.data.sessions || [])
+          setAllRecords(ar?.data?.attendance || [])
+          setSessions(ss?.data?.sessions || [])
         }
       } finally {
         setLoading(false)
@@ -75,10 +75,19 @@ export default function Dashboard() {
   startOfWeek.setHours(0, 0, 0, 0)
   const weekCount = allRecords.filter(r => r.timestamp && new Date(r.timestamp) >= startOfWeek && ['present', 'late', 'manual'].includes(r.status)).length
 
+  // New accurate calculations based on actual hours_worked
+  const completedHoursThisWeek = allRecords
+    .filter(r => r.timestamp && new Date(r.timestamp) >= startOfWeek)
+    .reduce((sum, r) => sum + (r.hours_worked || 0), 0)
+  
+  const targetCompletedPercent = Math.min(100, Math.round((completedHoursThisWeek / (user?.weekly_target_hours || 40.0)) * 100))
+
   const startOfMonth = new Date()
   startOfMonth.setDate(1)
   startOfMonth.setHours(0, 0, 0, 0)
   const monthCount = allRecords.filter(r => r.timestamp && new Date(r.timestamp) >= startOfMonth && ['present', 'late', 'manual'].includes(r.status)).length
+  
+  const lateCountMonth = allRecords.filter(r => r.timestamp && new Date(r.timestamp) >= startOfMonth && r.status === 'late').length
 
   const totalAttended = allRecords.filter(r => ['present', 'late', 'manual'].includes(r.status)).length
   const totalDays = allRecords.length
@@ -170,19 +179,19 @@ export default function Dashboard() {
           <div className="card p-5 space-y-3 bg-gradient-to-r from-slate-900 via-slate-800 to-cyan-950/20">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Weekly Work Target (40 Hours/Week)</p>
+                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Weekly Work Target ({user?.weekly_target_hours || 40} Hours/Week)</p>
                 <h3 className="text-xl font-bold text-slate-100 mt-1">
-                  {Math.min(user?.weekly_target_hours || 40, weekCount * 8)} / {user?.weekly_target_hours || 40} Hours Completed
+                  {completedHoursThisWeek.toFixed(1)} / {user?.weekly_target_hours || 40} Hours Completed
                 </h3>
               </div>
               <span className="badge badge-success text-xs font-bold px-3 py-1">
-                {Math.min(100, Math.round(((weekCount * 8) / (user?.weekly_target_hours || 40)) * 100))}% Completed
+                {targetCompletedPercent}% Completed
               </span>
             </div>
             <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
               <div
                 className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 rounded-full transition-all duration-500"
-                style={{ width: `${Math.min(100, Math.round(((weekCount * 8) / (user?.weekly_target_hours || 40)) * 100))}%` }}
+                style={{ width: `${targetCompletedPercent}%` }}
               />
             </div>
           </div>
@@ -203,9 +212,9 @@ export default function Dashboard() {
 
             <div className="card flex items-center justify-between p-4">
               <div>
-                <p className="text-xs text-slate-500 font-medium">Attended This Week</p>
+                <p className="text-xs text-slate-500 font-medium">Hours This Week</p>
                 <h3 className="text-xl font-bold text-slate-100 mt-1 tabular-nums">
-                  {weekCount} {weekCount === 1 ? 'day' : 'days'}
+                  {completedHoursThisWeek.toFixed(1)} hrs
                 </h3>
               </div>
               <Clock size={28} className="text-emerald-400" />
@@ -213,12 +222,12 @@ export default function Dashboard() {
 
             <div className="card flex items-center justify-between p-4">
               <div>
-                <p className="text-xs text-slate-500 font-medium">Attended This Month</p>
-                <h3 className="text-xl font-bold text-slate-100 mt-1 tabular-nums">
-                  {monthCount} {monthCount === 1 ? 'day' : 'days'}
+                <p className="text-xs text-slate-500 font-medium">Lates (This Month)</p>
+                <h3 className="text-xl font-bold text-rose-400 mt-1 tabular-nums">
+                  {lateCountMonth} {lateCountMonth === 1 ? 'day' : 'days'}
                 </h3>
               </div>
-              <Database size={28} className="text-violet-400" />
+              <Clock size={28} className="text-rose-400" />
             </div>
 
             <div className="card flex items-center justify-between p-4">
@@ -232,23 +241,29 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Quick Profile Redirect Action */}
-          <div className="card p-5 flex flex-col sm:flex-row items-center justify-between gap-4 bg-gradient-to-r from-slate-900 via-slate-800 to-cyan-950/20">
-            <div>
-              <h4 className="font-semibold text-slate-200">Face Scan & Profile Photo</h4>
-              <p className="text-xs text-slate-500 mt-0.5">
-                {user.has_face 
-                  ? `Active. You have ${user.face_count || 0} registered face scan(s) for recognition.` 
-                  : 'Action Required: Register your face scans on the profile page to enable automatic attendance tracking.'}
-              </p>
+          {/* Assigned Work Schedule & Rules */}
+          <div className="card p-5 bg-gradient-to-r from-slate-900 to-cyan-950/10 border border-cyan-500/10 space-y-3">
+            <h4 className="font-bold text-sm text-slate-200 flex items-center gap-2">
+              <Shield size={16} className="text-cyan-400" /> Your Assigned Work Schedule & Rules
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-400">
+              <div className="space-y-1 bg-slate-800/40 p-3 rounded-lg border border-slate-700/30">
+                <p className="text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Check-in Deadline</p>
+                <p className="text-sm font-semibold text-slate-200">
+                  {user?.must_check_in_time ? `Must check in by ${user.must_check_in_time.substring(0, 5)}` : 'No fixed check-in deadline (Flexible)'}
+                </p>
+                <p className="text-[10px] text-slate-500">Checking in after this time automatically sets status to "Late".</p>
+              </div>
+              <div className="space-y-1 bg-slate-800/40 p-3 rounded-lg border border-slate-700/30">
+                <p className="text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Mandatory Presence (Core Hours)</p>
+                <p className="text-sm font-semibold text-slate-200">
+                  {user?.must_be_in_start ? `Must be present between ${user.must_be_in_start.substring(0, 5)} - ${user.must_be_in_end.substring(0, 5)}` : 'No mandatory core presence hours (Flexible)'}
+                </p>
+                <p className="text-[10px] text-slate-500">Leaving early or checking in late violates core hours presence.</p>
+              </div>
             </div>
-            <button
-              onClick={() => navigate(`/students/${user.id}`)}
-              className="btn-primary text-xs py-2 px-4 whitespace-nowrap"
-            >
-              <Camera size={14} className="mr-1" /> View Profile & Face Scan
-            </button>
           </div>
+
 
           {/* Log filtering */}
           <div className="space-y-4">

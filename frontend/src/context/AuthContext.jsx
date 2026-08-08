@@ -41,7 +41,7 @@ export function AuthProvider({ children }) {
 
   const isAdmin = user?.role === 'admin'
   const isHR = user?.role === 'hr'
-  const isStudent = user?.role === 'student'
+  const isStudent = user?.role === 'student' || user?.role === 'user'
   const canManage = isAdmin || isHR
 
   return (

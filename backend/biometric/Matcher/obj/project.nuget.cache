@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "dgSpecHash": "Mhkkd1++Be/tSjgUL57LPsAoRT0VIAuWRKeXq6i2wrvKpo1tv+H9VuJX0sr1o7Z0Jwp1Zk0aqDaQEtWsdIImZQ==",
+  "success": true,
+  "projectFilePath": "D:\\NUB\\Final Project\\Attendence System\\Version 6\\backend\\biometric\\Matcher\\Matcher.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\MARK II\\.nuget\\packages\\dahomey.cbor\\1.16.1\\dahomey.cbor.1.16.1.nupkg.sha512",
+    "C:\\Users\\MARK II\\.nuget\\packages\\microsoft.netcore.platforms\\5.0.0\\microsoft.netcore.platforms.5.0.0.nupkg.sha512",
+    "C:\\Users\\MARK II\\.nuget\\packages\\sixlabors.imagesharp\\2.1.3\\sixlabors.imagesharp.2.1.3.nupkg.sha512",
+    "C:\\Users\\MARK II\\.nuget\\packages\\sourceafis\\3.14.0\\sourceafis.3.14.0.nupkg.sha512",
+    "C:\\Users\\MARK II\\.nuget\\packages\\system.io.pipelines\\6.0.1\\system.io.pipelines.6.0.1.nupkg.sha512",
+    "C:\\Users\\MARK II\\.nuget\\packages\\system.runtime.compilerservices.unsafe\\5.0.0\\system.runtime.compilerservices.unsafe.5.0.0.nupkg.sha512",
+    "C:\\Users\\MARK II\\.nuget\\packages\\system.text.encoding.codepages\\5.0.0\\system.text.encoding.codepages.5.0.0.nupkg.sha512"
+  ],
+  "logs": []
+}

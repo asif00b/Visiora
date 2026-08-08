@@ -1,0 +1,377 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>SourceAFIS</name>
+    </assembly>
+    <members>
+        <member name="T:SourceAFIS.FingerprintCompatibility">
+            <summary>Collection of methods helping with template compatibility.</summary>
+        </member>
+        <member name="P:SourceAFIS.FingerprintCompatibility.Version">
+            <summary>Version of the currently running SourceAFIS.</summary>
+            <value>Semantic version in a three-part 1.2.3 format.</value>
+            <remarks>
+            This is useful during upgrades when the application has to deal
+            with possible template incompatibility between versions.
+            Versions of different language ports of SourceAFIS are not kept in sync.
+            </remarks>
+        </member>
+        <member name="T:SourceAFIS.FingerprintImage">
+            <summary>Pixels and metadata of the fingerprint image.</summary>
+            <remarks>
+            <para>
+            This class captures all fingerprint information that is available prior to construction of <see cref="T:SourceAFIS.FingerprintTemplate" />.
+            It consists of pixel data and additional information in <see cref="T:SourceAFIS.FingerprintImageOptions" />.
+            Since SourceAFIS algorithm is not scale-invariant, all images should have DPI
+            configured explicitly by setting <see cref="P:SourceAFIS.FingerprintImageOptions.Dpi" />.
+            </para>
+            <para>
+            Application should start fingerprint processing by constructing an instance of <c>FingerprintImage</c>
+            and then passing it to <see cref="M:SourceAFIS.FingerprintTemplate.#ctor(SourceAFIS.FingerprintImage)" /> constructor.
+            </para>
+            <para>
+            Only raw grayscale images are currently supported.
+            </para>
+            </remarks>
+            <seealso cref="T:SourceAFIS.FingerprintImageOptions" />
+            <seealso cref="T:SourceAFIS.FingerprintTemplate" />
+        </member>
+        <member name="M:SourceAFIS.FingerprintImage.#ctor(System.Int32,System.Int32,System.Byte[],SourceAFIS.FingerprintImageOptions)">
+            <summary>Reads raw grayscale fingerprint image from byte array.</summary>
+            <remarks>
+            <para>
+            The image must contain black fingerprint on white background
+            in resolution specified by <see cref="P:SourceAFIS.FingerprintImageOptions.Dpi" />.
+            </para>
+            <para>
+            Pixels are represented as 8-bit unsigned bytes with 0 meaning black and 255 meaning white.
+            Pixels in <paramref name="pixels" /> array are ordered from top-left to bottom-right in horizontal rows.
+            Size of <paramref name="pixels" /> must be equal to <c>width * height</c>.
+            </para>
+            </remarks>
+            <param name="width">Width of the image.</param>
+            <param name="height">Height of the image.</param>
+            <param name="pixels">Image pixels ordered from top-left to bottom-right in horizontal rows.</param>
+            <param name="options">Additional information about the image or <c>null</c> for default options.</param>
+            <exception cref="T:System.NullReferenceException">Thrown when <paramref name="pixels" /> is <c>null</c>.</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException">
+            Thrown when <paramref name="width" /> or <paramref name="height" /> is not positive
+            or when <paramref name="pixels" /> length is not <c>width * height</c>.
+            </exception>
+            <seealso cref="M:SourceAFIS.FingerprintTemplate.#ctor(System.Byte[])" />
+        </member>
+        <member name="M:SourceAFIS.FingerprintImage.#ctor(System.Byte[],SourceAFIS.FingerprintImageOptions)">
+            <summary>
+            Decodes fingerprint image in standard format.
+            </summary>
+            <param name="image">Fingerprint image in one of the supported formats.</param>
+            <param name="options">Additional information about the image or null for default options.</param>
+            <exception cref="T:System.ArgumentNullException">Thrown when image is null.</exception>
+            <exception cref="T:System.ArgumentException">Thrown when image cannot be decoded.</exception>
+            <remarks>
+            <para>
+            The image must contain black fingerprint on white background
+            in resolution specified by setting <see cref="P:SourceAFIS.FingerprintImageOptions.Dpi" />.
+            </para>
+            <para>
+            The image may be in any format commonly used to store fingerprint images, including PNG, JPEG, BMP, and TIFF.
+            SourceAFIS will try to decode the image using <a href="https://sixlabors.com/products/imagesharp/">ImageSharp</a> library.
+            Note that ImageSharp might not support all versions and variations of the mentioned formats.
+            </para>
+            </remarks>
+        </member>
+        <member name="T:SourceAFIS.FingerprintImageOptions">
+            <summary>Additional information about fingerprint image.</summary>
+            <remarks>
+            <c>FingerprintImageOptions</c> can be passed to <see cref="T:SourceAFIS.FingerprintImage" /> constructor
+            to provide additional information about fingerprint image that supplements raw pixel data.
+            Since SourceAFIS algorithm is not scale-invariant, all images should have DPI configured explicitly by setting <see cref="P:SourceAFIS.FingerprintImageOptions.Dpi" />.
+            </remarks>
+            <seealso cref="T:SourceAFIS.FingerprintImage" />
+        </member>
+        <member name="P:SourceAFIS.FingerprintImageOptions.Dpi">
+            <summary>Gets or sets image resolution.</summary>
+            <value>Image resolution in DPI (dots per inch), usually around 500. Default DPI is 500.</value>
+            <remarks>
+            SourceAFIS algorithm is not scale-invariant. Fingerprints with incorrectly configured DPI may fail to match.
+            Check your fingerprint reader specification for correct DPI value.
+            </remarks>
+            <exception cref="T:System.ArgumentOutOfRangeException">Thrown when DPI is non-positive, impossibly low, or impossibly high.</exception>
+        </member>
+        <member name="T:SourceAFIS.FingerprintMatcher">
+            <summary>Fingerprint template representation optimized for fast 1:N matching.</summary>
+            <remarks>
+            <para>
+            <c>FingerprintMatcher</c> maintains data structures that improve matching speed at the cost of some RAM.
+            It can efficiently match one probe fingerprint to many candidate fingerprints.
+            </para>
+            <para>
+            New matcher is created by passing probe fingerprint template to <see cref="M:SourceAFIS.FingerprintMatcher.#ctor(SourceAFIS.FingerprintTemplate)" /> constructor.
+            Candidate fingerprint templates are then passed one by one to <see cref="M:SourceAFIS.FingerprintMatcher.Match(SourceAFIS.FingerprintTemplate)" /> method.
+            </para>
+            </remarks>
+            <seealso href="https://sourceafis.machinezoo.com/java">SourceAFIS for Java tutorial</seealso>
+            <seealso cref="T:SourceAFIS.FingerprintTemplate" />
+        </member>
+        <member name="M:SourceAFIS.FingerprintMatcher.#ctor(SourceAFIS.FingerprintTemplate)">
+            <summary>Creates fingerprint template representation optimized for fast 1:N matching.</summary>
+            <remarks>
+            <para>
+            Once the probe template is processed, candidate templates can be compared to it
+            by calling <see cref="M:SourceAFIS.FingerprintMatcher.Match(SourceAFIS.FingerprintTemplate)" />.
+            </para>
+            <para>
+            This constructor is expensive in terms of RAM footprint and CPU usage.
+            Initialized <c>FingerprintMatcher</c> should be reused for multiple <see cref="M:SourceAFIS.FingerprintMatcher.Match(SourceAFIS.FingerprintTemplate)" /> calls in 1:N matching.
+            </para>
+            </remarks>
+            <param name="probe">Probe fingerprint template to be matched to candidate fingerprints.</param>
+            <exception cref="T:System.NullReferenceException">Thrown when <paramref name="probe" /> is <c>null</c>.</exception>
+            <seealso cref="M:SourceAFIS.FingerprintMatcher.Match(SourceAFIS.FingerprintTemplate)" />
+        </member>
+        <member name="M:SourceAFIS.FingerprintMatcher.Match(SourceAFIS.FingerprintTemplate)">
+            <summary>Matches candidate fingerprint to probe fingerprint and calculates similarity score.</summary>
+            <remarks>
+            <para>
+            Candidate fingerprint in <paramref name="candidate" /> parameter is matched to probe fingerprint
+            previously passed to <see cref="M:SourceAFIS.FingerprintMatcher.#ctor(SourceAFIS.FingerprintTemplate)" /> constructor.
+            </para>
+            <para>
+            Returned similarity score is a non-negative number that increases with similarity between probe and candidate fingerprints.
+            Application should compare the score to a threshold with expression <c>(score >= threshold)</c> to arrive at boolean match/non-match decision.
+            Threshold 10 corresponds to FMR (False Match Rate, see <see href="https://en.wikipedia.org/wiki/Biometrics#Performance">Biometric Performance</see>
+            and <see href="https://en.wikipedia.org/wiki/Confusion_matrix">Confusion matrix</see>) of 10%, threshold 20 to FMR 1%, threshold 30 to FMR 0.1%, and so on.
+            </para>
+            <para>
+            Recommended threshold is 40, which corresponds to FMR 0.01%.
+            Correspondence between threshold and FMR is approximate and varies with quality of fingerprints being matched.
+            Increasing threshold rapidly reduces FMR, but it also slowly increases FNMR (False Non-Match Rate).
+            Threshold must be tailored to the needs of the application.
+            </para>
+            <para>
+            This method is thread-safe. Multiple threads can match candidates against single <c>FingerprintMatcher</c>.
+            </para>
+            </remarks>
+            <param name="candidate">Fingerprint template to be matched with probe fingerprint represented by this <c>FingerprintMatcher</c>.</param>
+            <returns>Similarity score between probe and candidate fingerprints.</returns>
+            <exception cref="T:System.NullReferenceException">Thrown when <paramref name="candidate" /> is <c>null</c>.</exception>
+        </member>
+        <member name="T:SourceAFIS.FingerprintTemplate">
+            <summary>Biometric description of a fingerprint suitable for efficient matching.</summary>
+            <remarks>
+            <para>
+            Fingerprint template holds high-level fingerprint features, specifically ridge endings and bifurcations (together called minutiae).
+            Original image is not preserved in the fingerprint template and there is no way to reconstruct the original fingerprint from its template.
+            </para>
+            <para>
+            <see cref="T:SourceAFIS.FingerprintImage" /> can be converted to template by calling <see cref="M:SourceAFIS.FingerprintTemplate.#ctor(SourceAFIS.FingerprintImage)" /> constructor.
+            </para>
+            <para>
+            Since image processing is expensive, applications should cache serialized templates.
+            Serialization into CBOR format is performed by <see cref="M:SourceAFIS.FingerprintTemplate.ToByteArray" /> method.
+            CBOR template can be deserialized by calling <see cref="M:SourceAFIS.FingerprintTemplate.#ctor(System.Byte[])" /> constructor.
+            </para>
+            <para>
+            Matching is performed by constructing <see cref="T:SourceAFIS.FingerprintMatcher" />,
+            passing probe fingerprint to its <see cref="M:SourceAFIS.FingerprintMatcher.#ctor(SourceAFIS.FingerprintTemplate)" /> constructor,
+            and then passing candidate fingerprints to its <see cref="M:SourceAFIS.FingerprintMatcher.Match(SourceAFIS.FingerprintTemplate)" /> method.
+            </para>
+            <para>
+            <c>FingerprintTemplate</c> contains two kinds of data: fingerprint features and search data structures.
+            Search data structures speed up matching at the cost of some RAM.
+            Only fingerprint features are serialized. Search data structures are recomputed after every deserialization.
+            </para>
+            </remarks>
+            <seealso href="https://sourceafis.machinezoo.com/java">SourceAFIS for Java tutorial</seealso>
+            <seealso cref="T:SourceAFIS.FingerprintImage" />
+            <seealso cref="T:SourceAFIS.FingerprintMatcher" />
+        </member>
+        <member name="F:SourceAFIS.FingerprintTemplate.Empty">
+            <summary>Gets the empty fallback template with no biometric data.</summary>
+            <value>Empty template.</value>
+            <remarks>
+            Empty template is useful as a fallback to simplify code.
+            It contains no biometric data and it does not match any other template including itself.
+            There is only one global instance. This property does not instantiate any new objects.
+            </remarks>
+        </member>
+        <member name="M:SourceAFIS.FingerprintTemplate.#ctor(SourceAFIS.FingerprintImage)">
+            <summary>Creates fingerprint template from fingerprint image.</summary>
+            <remarks>
+            This constructor runs an expensive feature extractor algorithm,
+            which analyzes the image and collects identifiable biometric features from it.
+            </remarks>
+            <param name="image">Fingerprint image to process.</param>
+            <exception cref="T:System.NullReferenceException">Thrown when <paramref name="image" /> is <c>null</c>.</exception>
+        </member>
+        <member name="M:SourceAFIS.FingerprintTemplate.#ctor(System.Byte[])">
+            <summary>Deserializes fingerprint template from byte array.</summary>
+            <remarks>
+            <para>
+            This constructor reads <see href="https://cbor.io/">CBOR</see>-encoded
+            template produced by <see cref="M:SourceAFIS.FingerprintTemplate.ToByteArray" />
+            and reconstructs an exact copy of the original fingerprint template.
+            </para>
+            <para>
+            Templates produced by previous versions of SourceAFIS may fail to deserialize correctly.
+            Applications should re-extract all templates from original images when upgrading SourceAFIS.
+            </para>
+            </remarks>
+            <param name="serialized">Serialized fingerprint template in <see href="https://cbor.io/">CBOR</see> format
+            produced by <see cref="M:SourceAFIS.FingerprintTemplate.ToByteArray" />.</param>
+            <exception cref="T:System.NullReferenceException">Thrown when <paramref name="serialized" /> is <c>null</c>.</exception>
+            <exception cref="T:System.Exception">Thrown when <paramref name="serialized" /> is not in the correct format or it is corrupted.</exception>
+        </member>
+        <member name="M:SourceAFIS.FingerprintTemplate.ToByteArray">
+            <summary>Serializes fingerprint template into byte array.</summary>
+            <remarks>
+            <para>
+            Serialized template can be stored in a database or sent over network.
+            It can be then deserialized by calling <see cref="M:SourceAFIS.FingerprintTemplate.#ctor(System.Byte[])" /> constructor.
+            Persisting templates alongside fingerprint images allows applications to start faster,
+            because template deserialization is more than 100x faster than re-extraction from fingerprint image.
+            </para>
+            <para>
+            Serialized template excludes search structures that <c>FingerprintTemplate</c> keeps to speed up matching.
+            Serialized template is therefore much smaller than in-memory <c>FingerprintTemplate</c>.
+            </para>
+            <para>
+            Serialization format can change with every SourceAFIS version. There is no backward compatibility of templates.
+            Applications should preserve raw fingerprint images, so that templates can be re-extracted after SourceAFIS upgrade.
+            Template format for current version of SourceAFIS is
+            <see href="https://sourceafis.machinezoo.com/template">documented on SourceAFIS website</see>.
+            </para>
+            </remarks>
+            <returns>Serialized fingerprint template in <see href="https://cbor.io/">CBOR</see> format.</returns>
+            <seealso cref="M:SourceAFIS.FingerprintTemplate.#ctor(System.Byte[])" />
+            <seealso href="https://sourceafis.machinezoo.com/template">Template format</seealso>
+        </member>
+        <member name="M:SourceAFIS.FingerprintTemplate.Memory">
+            <summary>
+            Estimates memory consumed by this template.
+            </summary>
+            <returns>Memory footprint estimate in bytes.</returns>
+            <remarks>
+            .NET does not have any convenient mechanism to measure RAM footprint of objects.
+            This method calculates best effort estimate based on documentation of CLR memory layout.
+            It will return estimate appropriate for bitness of the current process.
+            </remarks>
+        </member>
+        <member name="T:SourceAFIS.FingerprintTransparency">
+            <summary>Algorithm transparency API that can capture all intermediate data structures produced by SourceAFIS algorithm.</summary>
+            <remarks>
+            <para>
+            See <see href="https://sourceafis.machinezoo.com/transparency/">algorithm transparency</see> pages
+            on SourceAFIS website for more information and a tutorial on how to use this class.
+            </para>
+            <para>
+            Applications can subclass <c>FingerprintTransparency</c> and override
+            <see cref="M:SourceAFIS.FingerprintTransparency.Take(System.String,System.String,System.Byte[])" /> method to define new transparency data logger.
+            Applications can control what transparency data gets produced by overriding <see cref="M:SourceAFIS.FingerprintTransparency.Accepts(System.String)" />.
+            </para>
+            <para>
+            <c>FingerprintTransparency</c> instance should be created in a <c>using</c> statement.
+            It will be capturing transparency data from all operations on current thread
+            between invocation of the constructor and invocation of <see cref="M:SourceAFIS.FingerprintTransparency.Dispose" /> method,
+            which is called automatically by the <c>using</c> statement.
+            </para>
+            </remarks>
+            <seealso href="https://sourceafis.machinezoo.com/transparency/">Algorithm transparency in SourceAFIS</seealso>
+        </member>
+        <member name="M:SourceAFIS.FingerprintTransparency.#ctor">
+            <summary>Creates an instance of <c>FingerprintTransparency</c> and activates it.</summary>
+            <remarks>
+            <para>
+            Activation places the new <c>FingerprintTransparency</c> instance in thread-local storage,
+            which causes all operations executed by current thread to log data to this <c>FingerprintTransparency</c> instance.
+            If activations are nested, data is only logged to the currently innermost <c>FingerprintTransparency</c>.
+            </para>
+            <para>
+            Deactivation happens in <see cref="M:SourceAFIS.FingerprintTransparency.Dispose" /> method.
+            Instances of <c>FingerprintTransparency</c> should be created in <c>using</c> statement
+            to ensure that <see cref="M:SourceAFIS.FingerprintTransparency.Dispose" /> is always called.
+            </para>
+            <para>
+            <c>FingerprintTransparency</c> is an abstract class.
+            This constructor is only called by subclasses.
+            </para>
+            </remarks>
+            <seealso cref="M:SourceAFIS.FingerprintTransparency.Dispose" />
+        </member>
+        <member name="M:SourceAFIS.FingerprintTransparency.Dispose">
+            <summary>Deactivates transparency logging and releases system resources held by this instance if any.</summary>
+            <remarks>
+            <para>
+            This method is normally called automatically when <c>FingerprintTransparency</c> is used in <c>using</c> statement.
+            </para>
+            <para>
+            Deactivation stops transparency data logging to this instance of <c>FingerprintTransparency</c>.
+            Logging thus takes place between invocation of constructor (<see cref="M:SourceAFIS.FingerprintTransparency.#ctor" />) and invocation of this method.
+            If activations were nested, this method reactivates the outer <c>FingerprintTransparency</c>.
+            </para>
+            <para>
+            Subclasses can override this method to perform cleanup.
+            Default implementation of this method performs deactivation.
+            It must be called by overriding methods for deactivation to work correctly.
+            </para>
+            </remarks>
+            <seealso cref="M:SourceAFIS.FingerprintTransparency.#ctor" />
+        </member>
+        <member name="M:SourceAFIS.FingerprintTransparency.Accepts(System.String)">
+            <summary>Filters transparency data keys that can be passed to <see cref="M:SourceAFIS.FingerprintTransparency.Take(System.String,System.String,System.Byte[])" />.</summary>
+            <remarks>
+            <para>
+            Default implementation always returns <c>true</c>, i.e. all transparency data is passed to <see cref="M:SourceAFIS.FingerprintTransparency.Take(System.String,System.String,System.Byte[])" />.
+            Implementation can override this method to filter some keys out, which improves performance.
+            </para>
+            <para>
+            This method should always return the same result for the same key.
+            Result may be cached and this method might not be called every time something is about to be logged.
+            </para>
+            </remarks>
+            <param name="key">Transparency data key as used in <see cref="M:SourceAFIS.FingerprintTransparency.Take(System.String,System.String,System.Byte[])" />.</param>
+            <returns>Boolean status indicating whether transparency data under given key should be logged.</returns>
+            <seealso cref="M:SourceAFIS.FingerprintTransparency.Take(System.String,System.String,System.Byte[])" />
+        </member>
+        <member name="M:SourceAFIS.FingerprintTransparency.Take(System.String,System.String,System.Byte[])">
+            <summary>Records transparency data.</summary>
+            <remarks>
+            <para>
+            Subclasses must override this method, because the default implementation does nothing.
+            While this <c>FingerprintTransparency</c> object is active (between call to the constructor and call to <see cref="M:SourceAFIS.FingerprintTransparency.Dispose" />),
+            this method is called with transparency data in its parameters.
+            </para>
+            <para>
+            Parameter <paramref name="key" /> specifies the kind of transparency data being logged,
+            usually corresponding to some stage in the algorithm.
+            Parameter <paramref name="data" /> then contains the actual transparency data.
+            This method may be called multiple times with the same <paramref name="key" />
+            if the algorithm produces that kind of transparency data repeatedly.
+            See <see href="https://sourceafis.machinezoo.com/transparency/">algorithm transparency</see>
+            on SourceAFIS website for documentation of the structure of the transparency data.
+            </para>
+            <para>
+            Transparency data is offered only if <see cref="M:SourceAFIS.FingerprintTransparency.Accepts(System.String)" /> returns <c>true</c> for the same <paramref name="key" />.
+            This allows applications to efficiently collect only transparency data that is actually needed.
+            </para>
+            <para>
+            MIME type of the transparency data is provided, which may be useful for generic implementations,
+            for example transparency data browser app that changes type of visualization based on the MIME type.
+            Most transparency data is serialized in <see href="https://cbor.io/">CBOR</see> format (MIME application/cbor).
+            </para>
+            <para>
+            Implementations of this method should be synchronized. Although the current SourceAFIS algorithm is single-threaded,
+            future versions of SourceAFIS might run some parts of the algorithm in parallel, which would result in concurrent calls to this method.
+            </para>
+            <para>
+            If this method throws, exception is propagated through SourceAFIS code.
+            </para>
+            </remarks>
+            <param name="key">Specifies the kind of transparency data being logged.</param>
+            <param name="mime">MIME type of the transparency data in <paramref name="data" /> parameter.</param>
+            <param name="data">Transparency data being logged.</param>
+            <seealso href="https://sourceafis.machinezoo.com/transparency/">Algorithm transparency in SourceAFIS</seealso>
+            <seealso cref="M:SourceAFIS.FingerprintTransparency.Accepts(System.String)" />
+        </member>
+    </members>
+</doc>

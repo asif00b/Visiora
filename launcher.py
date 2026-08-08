@@ -28,7 +28,7 @@ def cleanup(sig=None, frame=None):
             p.kill()
         except Exception:
             pass
-    print(f"{GREEN}[✓] All services stopped successfully.{RESET}")
+    print(f"{GREEN}[OK] All services stopped successfully.{RESET}")
     sys.exit(0)
 
 signal.signal(signal.SIGINT, cleanup)
@@ -69,7 +69,7 @@ def main():
     if not wait_for_backend():
         print(f"\n{YELLOW}[!] Backend taking longer than usual, proceeding...{RESET}")
     else:
-        print(f"{GREEN}[✓] Backend is ONLINE!{RESET}\n")
+        print(f"{GREEN}[OK] Backend is ONLINE!{RESET}\n")
 
     # 3. Start Frontend (Vite - Clean HTTP)
     print(f"{YELLOW}[3/3] Launching Frontend & Public Tunnel...{RESET}")
@@ -86,38 +86,41 @@ def main():
     processes.append(frontend_proc)
 
     # 4. Start Cloudflare Tunnel silently in background (HTTP/2 fast protocol)
-    tunnel_cmd = ['cloudflared', 'tunnel', '--protocol', 'http2', '--url', 'http://localhost:5173']
-    tunnel_proc = subprocess.Popen(
-        tunnel_cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        creationflags=0x08000000 if os.name == 'nt' else 0 # CREATE_NO_WINDOW
-    )
-    processes.append(tunnel_proc)
-
     public_url = None
-    start_tunnel_wait = time.time()
-    while time.time() - start_tunnel_wait < 12:
-        line = tunnel_proc.stdout.readline()
-        if not line:
-            break
-        match = re.search(r'https://[a-zA-Z0-9\-]+\.trycloudflare\.com', line)
-        if match:
-            public_url = match.group(0)
-            break
+    try:
+        tunnel_cmd = ['cloudflared', 'tunnel', '--protocol', 'http2', '--url', 'http://localhost:5173']
+        tunnel_proc = subprocess.Popen(
+            tunnel_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            creationflags=0x08000000 if os.name == 'nt' else 0 # CREATE_NO_WINDOW
+        )
+        processes.append(tunnel_proc)
+
+        start_tunnel_wait = time.time()
+        while time.time() - start_tunnel_wait < 10:
+            line = tunnel_proc.stdout.readline()
+            if not line:
+                break
+            match = re.search(r'https://[a-zA-Z0-9\-]+\.trycloudflare\.com', line)
+            if match:
+                public_url = match.group(0)
+                break
+    except Exception as tunnel_err:
+        print(f"[!] Public Cloudflare tunnel skipped: {tunnel_err}")
 
     # Final Clean Summary Banner
     os.system('cls' if os.name == 'nt' else 'clear')
     print(f"{GREEN}{BOLD}============================================================{RESET}")
-    print(f"{GREEN}{BOLD}  VISIORA — SYSTEM ONLINE & ALL SERVICES READY! 🚀         {RESET}")
+    print(f"{GREEN}{BOLD}  VISIORA — SYSTEM ONLINE & ALL SERVICES READY!            {RESET}")
     print(f"{GREEN}{BOLD}============================================================{RESET}")
-    print(f" {GREEN}[✓]{RESET} {BOLD}Local Access Link  :{RESET} {CYAN}http://localhost:5173{RESET}")
+    print(f" {GREEN}[OK]{RESET} {BOLD}Local Access Link  :{RESET} {CYAN}http://localhost:5173{RESET}")
     if public_url:
-        print(f" {GREEN}[✓]{RESET} {BOLD}Public Access Link :{RESET} {CYAN}{public_url}{RESET}")
+        print(f" {GREEN}[OK]{RESET} {BOLD}Public Access Link :{RESET} {CYAN}{public_url}{RESET}")
     else:
-        print(f" {GREEN}[✓]{RESET} {BOLD}Public Access Link :{RESET} {CYAN}https://visiora.trycloudflare.com{RESET}")
+        print(f" {GREEN}[OK]{RESET} {BOLD}Public Access Link :{RESET} {CYAN}https://visiora.trycloudflare.com{RESET}")
     print(f"{GREEN}{BOLD}============================================================{RESET}")
     print(f" {GREEN}{BOLD}Link 2 ta ready!{RESET} Press {YELLOW}Ctrl+C{RESET} anytime to stop all services.\n")
 

@@ -1,0 +1,67 @@
+{
+  "format": 1,
+  "restore": {
+    "D:\\NUB\\Final Project\\Attendence System\\Version 6\\backend\\biometric\\Matcher\\Matcher.csproj": {}
+  },
+  "projects": {
+    "D:\\NUB\\Final Project\\Attendence System\\Version 6\\backend\\biometric\\Matcher\\Matcher.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "D:\\NUB\\Final Project\\Attendence System\\Version 6\\backend\\biometric\\Matcher\\Matcher.csproj",
+        "projectName": "Matcher",
+        "projectPath": "D:\\NUB\\Final Project\\Attendence System\\Version 6\\backend\\biometric\\Matcher\\Matcher.csproj",
+        "packagesPath": "C:\\Users\\MARK II\\.nuget\\packages\\",
+        "outputPath": "D:\\NUB\\Final Project\\Attendence System\\Version 6\\backend\\biometric\\Matcher\\obj\\",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "C:\\Users\\MARK II\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net6.0"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net6.0": {
+            "targetAlias": "net6.0",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        }
+      },
+      "frameworks": {
+        "net6.0": {
+          "targetAlias": "net6.0",
+          "dependencies": {
+            "SourceAFIS": {
+              "target": "Package",
+              "version": "[3.14.0, )"
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "D:\\NUB\\Final Project\\Attendence System\\Version 6\\backend\\biometric\\dotnet\\sdk\\6.0.428\\RuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}

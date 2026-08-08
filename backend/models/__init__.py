@@ -5,6 +5,7 @@ from models.session_model import SessionModel
 from models.attendance import Attendance
 from models.unknown_face import UnknownFace, SystemConfig
 from models.profile_change_request import ProfileChangeRequest
+from models.fingerprint import UserFingerprint
 
 __all__ = [
     'User',
@@ -15,6 +16,7 @@ __all__ = [
     'UnknownFace',
     'SystemConfig',
     'ProfileChangeRequest',
+    'UserFingerprint',
 ]
 
 
