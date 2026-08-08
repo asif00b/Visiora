@@ -5,10 +5,12 @@ import StatsCard from '../components/StatsCard'
 import { getStats, getUserAttendance } from '../api/attendance'
 import { getSystemInfo } from '../api/admin'
 import { getSessions } from '../api/sessions'
+import { getUserFingerprints } from '../api/biometric'
+import { getEncodingsInfo } from '../api/face'
 import AttendanceTable from '../components/AttendanceTable'
 import {
   Users, CalendarCheck, Database, Camera,
-  TrendingUp, Clock, Shield
+  TrendingUp, Clock, Shield, Fingerprint, CheckCircle2, AlertTriangle
 } from 'lucide-react'
 import {
   Chart as ChartJS, CategoryScale, LinearScale,
@@ -30,6 +32,8 @@ export default function Dashboard() {
   const [sessions, setSessions]             = useState([])
   const [studentLoading, setStudentLoading] = useState(true)
   const [preset, setPreset]                 = useState('all')
+  const [fingerprintsCount, setFingerprintsCount] = useState(0)
+  const [faceEncodingsCount, setFaceEncodingsCount] = useState(0)
   const [filters, setFilters]               = useState({
     session_id: '',
     status: '',
@@ -48,12 +52,16 @@ export default function Dashboard() {
           if (sr) setStats(sr.data.stats)
           if (ir) setSysInfo(ir.data.info)
         } else if (user?.role === 'student' || user?.role === 'user') {
-          const [ar, ss] = await Promise.all([
+          const [ar, ss, fp, fc] = await Promise.all([
             getUserAttendance(user?.id).catch(() => ({ data: { attendance: [] } })),
             getSessions().catch(() => ({ data: { sessions: [] } })),
+            getUserFingerprints(user?.id).catch(() => ({ data: { fingerprints: [] } })),
+            getEncodingsInfo(user?.id).catch(() => ({ data: { count: 0 } })),
           ])
           setAllRecords(ar?.data?.attendance || [])
           setSessions(ss?.data?.sessions || [])
+          setFingerprintsCount(fp?.data?.fingerprints?.length || 0)
+          setFaceEncodingsCount(fc?.data?.count || 0)
         }
       } finally {
         setLoading(false)
@@ -241,25 +249,84 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Assigned Work Schedule & Rules */}
-          <div className="card p-5 bg-gradient-to-r from-slate-900 to-cyan-950/10 border border-cyan-500/10 space-y-3">
-            <h4 className="font-bold text-sm text-slate-200 flex items-center gap-2">
-              <Shield size={16} className="text-cyan-400" /> Your Assigned Work Schedule & Rules
-            </h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-400">
-              <div className="space-y-1 bg-slate-800/40 p-3 rounded-lg border border-slate-700/30">
-                <p className="text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Check-in Deadline</p>
-                <p className="text-sm font-semibold text-slate-200">
-                  {user?.must_check_in_time ? `Must check in by ${user.must_check_in_time.substring(0, 5)}` : 'No fixed check-in deadline (Flexible)'}
-                </p>
-                <p className="text-[10px] text-slate-500">Checking in after this time automatically sets status to "Late".</p>
+          {/* Split Info Cards: Schedule on Left, Biometrics on Right */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Assigned Work Schedule & Rules */}
+            <div className="card p-5 bg-gradient-to-r from-slate-900 to-cyan-950/10 border border-cyan-500/10 flex flex-col justify-between">
+              <div className="space-y-3">
+                <h4 className="font-bold text-sm text-slate-200 flex items-center gap-2">
+                  <Shield size={16} className="text-cyan-400" /> Your Assigned Work Schedule & Rules
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs text-slate-400">
+                  <div className="space-y-1 bg-slate-800/40 p-3 rounded-lg border border-slate-700/30">
+                    <p className="text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Check-in Deadline</p>
+                    <p className="text-sm font-semibold text-slate-200">
+                      {user?.must_check_in_time ? `Must check in by ${user.must_check_in_time.substring(0, 5)}` : 'Flexible'}
+                    </p>
+                    <p className="text-[10px] text-slate-500">Late arrivals automatically flag status as "Late".</p>
+                  </div>
+                  <div className="space-y-1 bg-slate-800/40 p-3 rounded-lg border border-slate-700/30">
+                    <p className="text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Mandatory Presence</p>
+                    <p className="text-sm font-semibold text-slate-200">
+                      {user?.must_be_in_start ? `${user.must_be_in_start.substring(0, 5)} - ${user.must_be_in_end.substring(0, 5)}` : 'Flexible'}
+                    </p>
+                    <p className="text-[10px] text-slate-500">Leaving early violates mandatory presence hours.</p>
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1 bg-slate-800/40 p-3 rounded-lg border border-slate-700/30">
-                <p className="text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Mandatory Presence (Core Hours)</p>
-                <p className="text-sm font-semibold text-slate-200">
-                  {user?.must_be_in_start ? `Must be present between ${user.must_be_in_start.substring(0, 5)} - ${user.must_be_in_end.substring(0, 5)}` : 'No mandatory core presence hours (Flexible)'}
-                </p>
-                <p className="text-[10px] text-slate-500">Leaving early or checking in late violates core hours presence.</p>
+            </div>
+
+            {/* Biometric Credentials Status */}
+            <div className="card p-5 bg-gradient-to-r from-slate-900 to-cyan-950/10 border border-cyan-500/10 flex flex-col justify-between">
+              <div className="space-y-3">
+                <h4 className="font-bold text-sm text-slate-200 flex items-center gap-2">
+                  <Fingerprint size={16} className="text-cyan-400" /> Your Biometric Authentication Status
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs text-slate-400">
+                  {/* Face Rec status */}
+                  <div className="space-y-1.5 bg-slate-800/40 p-3 rounded-lg border border-slate-700/30 flex flex-col justify-between">
+                    <div>
+                      <p className="text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Face Registration</p>
+                      <p className="text-sm font-semibold text-slate-200 mt-1 flex items-center gap-1.5">
+                        <Camera size={14} className="text-slate-400" />
+                        Face ID
+                      </p>
+                    </div>
+                    <div>
+                      {faceEncodingsCount > 0 ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          <CheckCircle2 size={10} /> Active ({faceEncodingsCount} templates)
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                          <AlertTriangle size={10} /> Not Registered
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Fingerprint status */}
+                  <div className="space-y-1.5 bg-slate-800/40 p-3 rounded-lg border border-slate-700/30 flex flex-col justify-between">
+                    <div>
+                      <p className="text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Fingerprint Enrolled</p>
+                      <p className="text-sm font-semibold text-slate-200 mt-1 flex items-center gap-1.5">
+                        <Fingerprint size={14} className="text-slate-400" />
+                        Biometric Scan
+                      </p>
+                    </div>
+                    <div>
+                      {fingerprintsCount > 0 ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          <CheckCircle2 size={10} /> Active ({fingerprintsCount} fingers)
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                          <AlertTriangle size={10} /> Not Registered
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -363,70 +430,148 @@ export default function Dashboard() {
 
       {/* Admin/HR stats */}
       {canManage && (
-        <>
+        <div className="space-y-6 animate-fade-in">
           {loading ? (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="card h-32 animate-pulse bg-slate-800" />
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatsCard title="Total Users" value={stats?.total_users ?? '—'} icon={Users} color="cyan" />
-              <StatsCard title="Today's Attendance" value={stats?.today_count ?? '—'} icon={CalendarCheck} color="emerald" />
-              <StatsCard title="Total Records" value={stats?.total_records ?? '—'} icon={Database} color="violet" />
-              <StatsCard
-                title="Face Encodings"
-                value={sysInfo?.total_encodings ?? '—'}
-                subtitle={sysInfo?.face_recognition_available ? 'AI Active' : 'AI Offline'}
-                icon={Camera}
-                color={sysInfo?.face_recognition_available ? 'emerald' : 'rose'}
-              />
-            </div>
-          )}
-
-          {/* Chart */}
-          {chartData && (
-            <div className="card">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-100">Attendance Trend</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Last 7 days</p>
-                </div>
-                <TrendingUp size={20} className="text-cyan-400" />
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="card h-32 animate-pulse bg-slate-800" />
+                ))}
               </div>
-              <Bar data={chartData} options={chartOptions} height={80} />
-            </div>
-          )}
+              <div className="card h-64 animate-pulse bg-slate-800" />
+            </>
+          ) : (
+            <>
+              {/* Daily Attendance Progress / Target */}
+              <div className="card p-5 space-y-3 bg-gradient-to-r from-slate-900 via-slate-800 to-cyan-950/20">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                      Daily Attendance Progress
+                    </p>
+                    <h3 className="text-xl font-bold text-slate-100 mt-1">
+                      {stats?.today_present ?? 0} / {stats?.total_users ?? 0} Present — {stats?.attendance_percentage ?? 0}%
+                    </h3>
+                  </div>
+                  <span className="badge badge-success text-xs font-bold px-3 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    {stats?.attendance_percentage ?? 0}% Present
+                  </span>
+                </div>
+                <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+                  <div
+                    className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 rounded-full transition-all duration-500"
+                    style={{ width: `${stats?.attendance_percentage ?? 0}%` }}
+                  />
+                </div>
+              </div>
 
-          {/* Quick actions */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <button
-              onClick={() => navigate('/scanner')}
-              className="card hover:border-cyan-500/40 transition-all duration-300 text-left group"
-            >
-              <Camera size={24} className="text-cyan-400 mb-3 group-hover:scale-110 transition-transform" />
-              <h3 className="font-bold text-slate-100">Open Scanner</h3>
-              <p className="text-sm text-slate-500 mt-1">Launch real-time face recognition</p>
-            </button>
-            <button
-              onClick={() => navigate('/students/register')}
-              className="card hover:border-emerald-500/40 transition-all duration-300 text-left group"
-            >
-              <Users size={24} className="text-emerald-400 mb-3 group-hover:scale-110 transition-transform" />
-              <h3 className="font-bold text-slate-100">Register User</h3>
-              <p className="text-sm text-slate-500 mt-1">Add new user with face capture</p>
-            </button>
-            <button
-              onClick={() => navigate('/attendance/report')}
-              className="card hover:border-violet-500/40 transition-all duration-300 text-left group"
-            >
-              <Clock size={24} className="text-violet-400 mb-3 group-hover:scale-110 transition-transform" />
-              <h3 className="font-bold text-slate-100">Attendance Report</h3>
-              <p className="text-sm text-slate-500 mt-1">Filter, view and export records</p>
-            </button>
-          </div>
-        </>
+              {/* Stats Cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatsCard title="Total Employees" value={stats?.total_users ?? '—'} icon={Users} color="cyan" />
+                <StatsCard title="Today's Present" value={stats?.today_present ?? '—'} icon={CalendarCheck} color="emerald" />
+                <StatsCard title="Today's Absent" value={stats?.today_absent ?? '—'} icon={Users} color="rose" />
+                <StatsCard
+                  title="Attendance Rate"
+                  value={stats?.attendance_percentage !== undefined ? `${stats.attendance_percentage}%` : '—'}
+                  icon={TrendingUp}
+                  color="violet"
+                />
+              </div>
+
+              {/* Detailed Insights: 2-column Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Column 1: Attendance Trend Chart (takes 2/3 width on large screens) */}
+                {chartData && (
+                  <div className="card lg:col-span-2 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-6">
+                        <div>
+                          <h2 className="text-lg font-bold text-slate-100">Attendance Trend</h2>
+                          <p className="text-xs text-slate-500 mt-0.5">Last 7 days</p>
+                        </div>
+                        <TrendingUp size={20} className="text-cyan-400" />
+                      </div>
+                      <div className="w-full">
+                        <Bar data={chartData} options={chartOptions} height={110} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Column 2: Today's Punch Breakdown & Recent Activity (takes 1/3 width) */}
+                <div className="space-y-6">
+                  {/* Today's breakdown */}
+                  <div className="card p-5 space-y-4">
+                    <div>
+                      <h3 className="font-bold text-sm text-slate-200">Today's Punch Breakdown</h3>
+                      <p className="text-[10px] text-slate-500 mt-0.5 uppercase tracking-wider">Breakdown of current status</p>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between p-2.5 rounded-lg bg-emerald-500/5 border border-emerald-500/10">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                          <span className="text-xs text-slate-300 font-medium">On-Time</span>
+                        </div>
+                        <span className="text-xs font-bold text-emerald-400">{stats?.today_on_time ?? 0}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between p-2.5 rounded-lg bg-amber-500/5 border border-amber-500/10">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-amber-400" />
+                          <span className="text-xs text-slate-300 font-medium">Late Arrivals</span>
+                        </div>
+                        <span className="text-xs font-bold text-amber-400">{stats?.today_late ?? 0}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between p-2.5 rounded-lg bg-sky-500/5 border border-sky-500/10">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-sky-400" />
+                          <span className="text-xs text-slate-300 font-medium">Manual Overrides</span>
+                        </div>
+                        <span className="text-xs font-bold text-sky-400">{stats?.today_manual ?? 0}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Recent Activity feed */}
+                  <div className="card p-5 space-y-4">
+                    <div>
+                      <h3 className="font-bold text-sm text-slate-200">Recent Activity</h3>
+                      <p className="text-[10px] text-slate-500 mt-0.5 uppercase tracking-wider">Last 5 check-ins today</p>
+                    </div>
+                    <div className="space-y-3 max-h-[220px] overflow-y-auto pr-1" style={{ scrollbarWidth: 'none' }}>
+                      {!stats?.recent_activity || stats.recent_activity.length === 0 ? (
+                        <p className="text-xs text-slate-500 text-center py-4">No activity logged today</p>
+                      ) : (
+                        stats.recent_activity.map((act) => {
+                          const timeStr = act.timestamp ? new Date(act.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'
+                          return (
+                            <div key={act.id} className="flex items-center justify-between gap-3 p-2.5 rounded-lg bg-slate-800/40 border border-slate-700/30 hover:border-slate-700 transition-colors">
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-slate-200 truncate">{act.user?.name || 'Unknown'}</p>
+                                <p className="text-[10px] text-slate-500 truncate">{act.user?.department?.name || 'System'}</p>
+                              </div>
+                              <div className="text-right flex-shrink-0">
+                                <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase border ${
+                                  act.status === 'present' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                  act.status === 'late' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                                  'bg-sky-500/10 text-sky-400 border-sky-500/20'
+                                }`}>
+                                  {act.status}
+                                </span>
+                                <p className="text-[9px] text-slate-500 mt-0.5">{timeStr}</p>
+                              </div>
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
       )}
     </div>
   )

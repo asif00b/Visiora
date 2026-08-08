@@ -248,6 +248,38 @@ def attendance_stats():
         today_count  = Attendance.query.filter(Attendance.timestamp >= today_start).count()
         total_records = Attendance.query.count()
 
+        # Detailed Today's Stats
+        from sqlalchemy import func
+        today_present_users = db.session.query(Attendance.user_id).filter(
+            Attendance.timestamp >= today_start,
+            Attendance.status.in_(['present', 'late', 'manual'])
+        ).distinct().count()
+
+        today_absent = max(0, total_users - today_present_users)
+        
+        today_presents_on_time = db.session.query(Attendance.user_id).filter(
+            Attendance.timestamp >= today_start,
+            Attendance.status == 'present'
+        ).distinct().count()
+
+        today_presents_late = db.session.query(Attendance.user_id).filter(
+            Attendance.timestamp >= today_start,
+            Attendance.status == 'late'
+        ).distinct().count()
+
+        today_presents_manual = db.session.query(Attendance.user_id).filter(
+            Attendance.timestamp >= today_start,
+            Attendance.status == 'manual'
+        ).distinct().count()
+
+        attendance_percentage = round((today_present_users / total_users * 100), 1) if total_users > 0 else 0.0
+
+        # Recent 5 check-ins today
+        recent_records = Attendance.query.filter(
+            Attendance.timestamp >= today_start
+        ).order_by(Attendance.timestamp.desc()).limit(5).all()
+        recent_activity = [r.safe_to_dict() for r in recent_records]
+
         # Last 7 days trend
         trend = []
         for i in range(6, -1, -1):
@@ -262,7 +294,6 @@ def attendance_stats():
 
         # Users without any face encodings
         from models.face_encoding import FaceEncoding
-        from sqlalchemy import func
         registered_ids = db.session.query(FaceEncoding.user_id).distinct().subquery()
         no_face_count  = User.query.filter(
             User.is_active == True,
@@ -277,6 +308,13 @@ def attendance_stats():
                 'total_records': total_records,
                 'no_face_count': no_face_count,
                 'trend':         trend,
+                'today_present': today_present_users,
+                'today_absent':  today_absent,
+                'today_late':    today_presents_late,
+                'today_on_time': today_presents_on_time,
+                'today_manual':  today_presents_manual,
+                'attendance_percentage': attendance_percentage,
+                'recent_activity': recent_activity,
             }
         }), 200
 
