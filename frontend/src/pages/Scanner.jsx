@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useCamera } from '../hooks/useCamera'
 import { recognizeFace } from '../api/face'
-import { getActiveSessions } from '../api/sessions'
-import { verifyBiometricScan, pollHardwareSensor } from '../api/biometric'
-import { Camera, CameraOff, Zap, UserCheck, Activity, Maximize2, Minimize2, Fingerprint, ShieldCheck, RefreshCw } from 'lucide-react'
-// Estimate basic facial expression from 5 facial keypoints using geometry
+import { getAttendance } from '../api/attendance'
+import { verifyBiometricScan } from '../api/biometric'
+import { Camera, CameraOff, Zap, UserCheck, Activity, Maximize2, Minimize2, Fingerprint } from 'lucide-react'
+
 const estimateEmotion = (kpss) => {
   if (!kpss || kpss.length < 5) return 'Neutral'
   try {
@@ -19,7 +19,6 @@ const estimateEmotion = (kpss) => {
     if (eyeDist === 0) return 'Neutral'
     const ratio = mouthWidth / eyeDist
     
-    // Smile widens the mouth corners relative to the distance between eyes
     if (ratio > 0.82) return 'Happy'
     if (ratio < 0.65) return 'Serious'
     return 'Neutral'
@@ -45,14 +44,18 @@ export default function Scanner() {
   const currentScanRate = useRef(0)
   const latestFacesRef = useRef([])
 
-  const [sessions, setSessions] = useState([])
-  const [selectedSession, setSelectedSession] = useState('')
   const [selectedCamera, setSelectedCamera] = useState('')
   const [scanning, setScanning] = useState(false)
   const [notifications, setNotifications] = useState([])
   const [markedCount, setMarkedCount] = useState(0)
   const [debugToggles, setDebugToggles] = useState(debugRef.current)
   const [mirrored, setMirrored] = useState(false)
+  const [bioMessage, setBioMessage] = useState('')
+  const [sensorTouch, setSensorTouch] = useState(false)
+  const [livePreviewSrc, setLivePreviewSrc] = useState(null)
+  const [isSleeping, setIsSleeping] = useState(false)
+  const lastMotionRef = useRef(Date.now())
+  const scanningRef = useRef(false)
 
   const containerRef = useRef(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -77,20 +80,19 @@ export default function Scanner() {
   const scannerIntervalMs = 150
   const scannerFrameMaxWidth = 640
 
-  // ── Cyber Blue Theme Colors ──
   const THEME = {
-    primary: '#00d4ff',       // Bright cyan for reticle & matched
-    primaryDim: '#0891b2',    // Muted cyan
-    accent: '#06b6d4',        // Tailwind cyan-500
-    danger: '#ef4444',        // Red for unmatched
-    success: '#10b981',       // Green for confirmed match
-    text: '#e2e8f0',          // Slate-200
-    textDim: '#64748b',       // Slate-500
-    cardBg: 'rgba(8, 18, 40, 0.88)', // Deep navy glass
-    cardBorder: 'rgba(6, 182, 212, 0.15)', // Cyan border
-    landmarkEye: '#22d3ee',   // Cyan-400
-    landmarkNose: '#facc15',  // Yellow
-    landmarkMouth: '#f472b6', // Pink
+    primary: '#00d4ff',
+    primaryDim: '#0891b2',
+    accent: '#06b6d4',
+    danger: '#ef4444',
+    success: '#10b981',
+    text: '#e2e8f0',
+    textDim: '#64748b',
+    cardBg: 'rgba(8, 18, 40, 0.88)',
+    cardBorder: 'rgba(6, 182, 212, 0.15)',
+    landmarkEye: '#22d3ee',
+    landmarkNose: '#facc15',
+    landmarkMouth: '#f472b6',
   }
 
   const toggleDebug = useCallback((key) => {
@@ -101,11 +103,37 @@ export default function Scanner() {
     })
   }, [])
 
-  useEffect(() => {
-    getActiveSessions()
-      .then(r => setSessions(r.data.sessions || []))
-      .catch(() => {})
+  // Load today's recent attendance records so the Live Feed NEVER vanishes
+  const loadTodayAttendance = useCallback(async () => {
+    try {
+      const todayStr = new Date().toISOString().slice(0, 10)
+      const res = await getAttendance({ start_date: todayStr, end_date: todayStr })
+      const recs = res.data.attendance || []
+      recs.sort((a, b) => new Date(b.punch_out || b.timestamp || 0) - new Date(a.punch_out || a.timestamp || 0))
+
+      const items = recs.map(r => ({
+        id: r.id,
+        name: r.user_name || r.user?.name || 'User',
+        photo: r.user_image || r.user?.image_path || null,
+        punch_type: r.punch_out ? 'OUT' : 'IN',
+        method: (r.note || '').toLowerCase().includes('biometric') ? 'Fingerprint' : 'Face',
+        time: new Date(r.punch_out || r.timestamp),
+        student_id: r.user_student_id || r.user?.student_id || '—',
+        in_time: r.timestamp,
+        out_time: r.punch_out,
+        target_hours: r.user?.weekly_target_hours || 40.0
+      }))
+
+      setNotifications(items.slice(0, 10))
+      setMarkedCount(recs.length)
+    } catch {
+      // Keep existing
+    }
   }, [])
+
+  useEffect(() => {
+    loadTodayAttendance()
+  }, [loadTodayAttendance])
 
   const drawBoxes = useCallback((faces) => {
     const video = videoRef.current
@@ -120,293 +148,191 @@ export default function Scanner() {
     }
 
     const ctx = canvas.getContext('2d')
+    if (!ctx) return
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-    // Calculate actual video dimensions and offsets (handling object-cover)
-    const vWidth = video.videoWidth || 640
-    const vHeight = video.videoHeight || 480
-    const cWidth = canvas.width
-    const cHeight = canvas.height
-    
-    const vRatio = vWidth / vHeight
-    const cRatio = cWidth / cHeight
-    
-    let drawW, drawH, offsetX, offsetY
-    if (cRatio > vRatio) {
-      // Canvas is wider relative to video ratio, fill width and overflow height (object-cover)
-      drawW = cWidth
-      drawH = cWidth / vRatio
-      offsetX = 0
-      offsetY = (cHeight - drawH) / 2
+    const scaleX = canvas.width / (video.videoWidth || canvas.width)
+    const scaleY = canvas.height / (video.videoHeight || canvas.height)
+    const activeDebug = debugRef.current
+
+    if (faces.length > 0 && faces.some(f => f.matched)) {
+      const primaryFace = faces.find(f => f.matched)
+      if (primaryFace && primaryFace.location) {
+        const [top, right, bottom, left] = primaryFace.location
+        const fw = (right - left) * scaleX
+        const fh = (bottom - top) * scaleY
+        const videoW = canvas.width
+        const videoH = canvas.height
+
+        const targetScale = Math.min(1.7, Math.max(1.0, 0.45 / (fw / videoW)))
+        const faceCenterX = ((left + right) / 2) * scaleX
+        const faceCenterY = ((top + bottom) / 2) * scaleY
+
+        const targetTx = (videoW / 2 - faceCenterX) * (targetScale - 1.0)
+        const targetTy = (videoH / 2 - faceCenterY) * (targetScale - 1.0)
+
+        currentScaleRef.current += (targetScale - currentScaleRef.current) * 0.12
+        currentTxRef.current += (targetTx - currentTxRef.current) * 0.12
+        currentTyRef.current += (targetTy - currentTyRef.current) * 0.12
+      }
     } else {
-      // Canvas is taller relative to video ratio, fill height and overflow width (object-cover)
-      drawH = cHeight
-      drawW = cHeight * vRatio
-      offsetX = (cWidth - drawW) / 2
-      offsetY = 0
+      currentScaleRef.current += (1.0 - currentScaleRef.current) * 0.15
+      currentTxRef.current += (0.0 - currentTxRef.current) * 0.15
+      currentTyRef.current += (0.0 - currentTyRef.current) * 0.15
     }
 
-    // Update scan rate counter (measured per second from doScan completions)
-    const now = Date.now()
-    if (now - lastScanTime.current > 1000) {
-      currentScanRate.current = scanCount.current
-      scanCount.current = 0
-      lastScanTime.current = now
+    if (zoomWrapperRef.current) {
+      zoomWrapperRef.current.style.transform = `translate3d(${currentTxRef.current}px, ${currentTyRef.current}px, 0) scale(${currentScaleRef.current})`
     }
 
-    if (debugRef.current.active && debugRef.current.fps) {
-      ctx.fillStyle = THEME.primary
-      ctx.font = 'bold 14px monospace'
-      const fpsText = `${currentScanRate.current} scans/s`
-      const fpsTextWidth = ctx.measureText(fpsText).width
-      ctx.fillText(fpsText, canvas.width - fpsTextWidth - 15, 25)
-    }
+    faces.forEach((face) => {
+      const [top, right, bottom, left] = face.location
+      let x = left * scaleX
+      const y = top * scaleY
+      const w = (right - left) * scaleX
+      const h = (bottom - top) * scaleY
 
-
-
-    faces.forEach(face => {
-      const { box, name, matched, confidence } = face
-      if (!box) return
-
-      const bTop = box.top ?? 0
-      const bLeft = box.left ?? 0
-      const bRight = box.right ?? 0
-      const bBottom = box.bottom ?? 0
-
-      // Map 0-1 coordinates to the actual video area
-      const x_v = mirrored ? (1.0 - bRight) : bLeft
-      const y_v = bTop
-      const w_v = bRight - bLeft
-      const h_v = bBottom - bTop
-
-      const rawX = offsetX + (x_v * drawW)
-      const rawY = offsetY + (y_v * drawH)
-      const rawW = w_v * drawW
-      const rawH = h_v * drawH
-
-      // Calculate visual screen coordinates by applying current zoom & pan (keeping canvas sharp)
-      const scale = currentScaleRef.current
-      const txPx = (currentTxRef.current / 100) * canvas.width
-      const tyPx = (currentTyRef.current / 100) * canvas.height
-      const centerX = canvas.width / 2
-      const centerY = canvas.height / 2
-
-      const x = (rawX - centerX) * scale + centerX + txPx
-      const y = (rawY - centerY) * scale + centerY + tyPx
-      const w = rawW * scale
-      const h = rawH * scale
-
-      const alreadyMarked = matched && markedRef.current.has(face.user_id)
-      const justMarked = face.attendance_marked
-      
-      // Color logic: GREEN = matched, RED = unknown/spoof, CYAN = scanning/stabilizing
-      let statusColor = THEME.danger  // default: red for unknown
-      if (face.recognition_confirmed || (matched && alreadyMarked)) {
-        statusColor = THEME.success   // green for confirmed match
-      } else if (matched) {
-        statusColor = THEME.success   // green for matched
-      } else if (face.debug?.status === 'SPOOF_DETECTED') {
-        statusColor = THEME.danger    // red for spoof
-      } else if (face.debug?.status === 'STABILIZING' || face.debug?.status === 'LIVENESS_CHECK') {
-        statusColor = THEME.primary   // cyan while scanning
+      if (mirrored) {
+        x = canvas.width - x - w
       }
 
-      // ── Corner Bracket Reticle ──
-      const cornerOffset = 4;
-      const cornerLength = Math.min(22, w * 0.18, h * 0.18);
-      const strokeWidth = 2.5;
-      
-      ctx.strokeStyle = statusColor;
-      ctx.lineWidth = strokeWidth;
-      
-      // Top-Left Corner
-      ctx.beginPath();
-      ctx.moveTo(x - cornerOffset, y - cornerOffset + cornerLength);
-      ctx.lineTo(x - cornerOffset, y - cornerOffset);
-      ctx.lineTo(x - cornerOffset + cornerLength, y - cornerOffset);
-      ctx.stroke();
-      
-      // Top-Right Corner
-      ctx.beginPath();
-      ctx.moveTo(x + w + cornerOffset - cornerLength, y - cornerOffset);
-      ctx.lineTo(x + w + cornerOffset, y - cornerOffset);
-      ctx.lineTo(x + w + cornerOffset, y - cornerOffset + cornerLength);
-      ctx.stroke();
-      
-      // Bottom-Left Corner
-      ctx.beginPath();
-      ctx.moveTo(x - cornerOffset, y + h + cornerOffset - cornerLength);
-      ctx.lineTo(x - cornerOffset, y + h + cornerOffset);
-      ctx.lineTo(x - cornerOffset + cornerLength, y + h + cornerOffset);
-      ctx.stroke();
-      
-      // Bottom-Right Corner
-      ctx.beginPath();
-      ctx.moveTo(x + w + cornerOffset - cornerLength, y + h + cornerOffset);
-      ctx.lineTo(x + w + cornerOffset, y + h + cornerOffset);
-      ctx.lineTo(x + w + cornerOffset, y + h + cornerOffset - cornerLength);
-      ctx.stroke();
+      const isConfirmed = face.matched && face.recognition_confirmed
+      const isCandidate = face.matched && !face.recognition_confirmed
+      const color = isConfirmed ? THEME.success : isCandidate ? THEME.primary : THEME.danger
+      const glowColor = isConfirmed ? 'rgba(16, 185, 129, 0.4)' : isCandidate ? 'rgba(0, 212, 255, 0.4)' : 'rgba(239, 68, 68, 0.4)'
 
-      // ── Faint dashed bounding box ──
-      ctx.strokeStyle = statusColor + '15';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
-      ctx.strokeRect(x, y, w, h);
-      ctx.setLineDash([]);
+      ctx.save()
+      ctx.shadowColor = glowColor
+      ctx.shadowBlur = 16
 
-      // ── Subtle face ellipse ──
-      ctx.strokeStyle = statusColor + '30';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.ellipse(x + w / 2, y + h / 2, w / 2 * 1.05, h / 2 * 1.15, 0, 0, 2 * Math.PI);
-      ctx.stroke();
+      const cornerLen = Math.min(w, h) * 0.25
+      const cornerRadius = 6
 
-      // ── Face Name / Identification Label ──
-      const label = face.recognition_confirmed
-        ? name
-        : (face.debug?.status === 'SPOOF_DETECTED'
-          ? 'Spoof Detected'
-          : face.debug?.status === 'LIVENESS_CHECK'
-            ? 'Blink or Move'
-            : face.debug?.status === 'STABILIZING' || !face.debug
-              ? 'Scanning...'
-              : 'Unknown')
-      const sub = justMarked ? 'Marked' : alreadyMarked ? 'Present' : matched ? `${Number(confidence || 0).toFixed(0)}%` : ''
-      ctx.font = 'bold 12px Inter, sans-serif'
-      const textWidth = Math.max(ctx.measureText(label).width, ctx.measureText(sub).width) + 16
-      const labelHeight = sub ? 40 : 24
-      const labelX = Math.min(Math.max(4, x), canvas.width - textWidth - 4)
-      const labelY = Math.max(4, y - labelHeight - 8)
+      ctx.strokeStyle = color
+      ctx.lineWidth = 2.5
+      ctx.beginPath()
 
-      // Deep navy glassmorphic card for label
-      ctx.fillStyle = THEME.cardBg;
-      ctx.beginPath();
-      ctx.roundRect(labelX, labelY, textWidth, labelHeight, 6);
-      ctx.fill();
-      
-      // Left border accent line
-      ctx.strokeStyle = statusColor;
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.moveTo(labelX, labelY);
-      ctx.lineTo(labelX, labelY + labelHeight);
-      ctx.stroke();
+      ctx.moveTo(x + cornerRadius, y)
+      ctx.lineTo(x + cornerLen, y)
+      ctx.moveTo(x, y + cornerRadius)
+      ctx.lineTo(x, y + cornerLen)
+      ctx.arcTo(x, y, x + cornerRadius, y, cornerRadius)
 
-      // Draw text
-      ctx.fillStyle = THEME.text;
-      ctx.font = 'bold 11px Inter, sans-serif';
-      ctx.fillText(label, labelX + 8, labelY + 16);
-      if (sub) {
-        ctx.font = '500 10px Inter, sans-serif';
-        ctx.fillStyle = statusColor;
-        ctx.fillText(sub, labelX + 8, labelY + 31);
+      ctx.moveTo(x + w - cornerLen, y)
+      ctx.lineTo(x + w - cornerRadius, y)
+      ctx.moveTo(x + w, y + cornerRadius)
+      ctx.lineTo(x + w, y + cornerLen)
+      ctx.arcTo(x + w, y, x + w - cornerRadius, y, cornerRadius)
+
+      ctx.moveTo(x + cornerRadius, y + h)
+      ctx.lineTo(x + cornerLen, y + h)
+      ctx.moveTo(x, y + h - cornerRadius)
+      ctx.lineTo(x, y + h - cornerLen)
+      ctx.arcTo(x, y + h, x + cornerRadius, y + h, cornerRadius)
+
+      ctx.moveTo(x + w - cornerLen, y + h)
+      ctx.lineTo(x + w - cornerRadius, y + h)
+      ctx.moveTo(x + w, y + h - cornerRadius)
+      ctx.lineTo(x + w, y + h - cornerLen)
+      ctx.arcTo(x + w, y + h, x + w - cornerRadius, y + h, cornerRadius)
+
+      ctx.stroke()
+      ctx.restore()
+
+      if (activeDebug.active && activeDebug.landmarks && face.landmarks) {
+        const kps = face.landmarks
+        kps.forEach((pt, idx) => {
+          let px = pt.x * scaleX
+          const py = pt.y * scaleY
+          if (mirrored) px = canvas.width - px
+
+          ctx.beginPath()
+          ctx.arc(px, py, 2.5, 0, 2 * Math.PI)
+          if (idx <= 1) ctx.fillStyle = THEME.landmarkEye
+          else if (idx === 2) ctx.fillStyle = THEME.landmarkNose
+          else ctx.fillStyle = THEME.landmarkMouth
+          ctx.fill()
+        })
       }
 
-      // ── Simplified Diagnostics Telemetry Panel (3 lines) ──
-      if (debugRef.current.active && debugRef.current.measurements && face.debug) {
-        const panelW = 200
-        const panelH = 90
-        const panelX = x + w + panelW + 14 < canvas.width ? x + w + 10 : Math.max(10, x - panelW - 10)
-        const panelY = Math.min(Math.max(10, y), canvas.height - panelH - 10)
+      const cardW = Math.max(w * 1.15, 230)
+      const cardH = 85
+      let cardX = x + (w - cardW) / 2
+      let cardY = y + h + 12
 
-        // Deep navy glassmorphic card
-        ctx.fillStyle = THEME.cardBg
-        ctx.beginPath()
-        ctx.roundRect(panelX, panelY, panelW, panelH, 10)
-        ctx.fill()
-        
-        // Cyan border
-        ctx.strokeStyle = THEME.cardBorder
-        ctx.lineWidth = 1.5
-        ctx.stroke()
+      if (cardX < 10) cardX = 10
+      if (cardX + cardW > canvas.width - 10) cardX = canvas.width - cardW - 10
+      if (cardY + cardH > canvas.height - 10) cardY = y - cardH - 12
 
-        // Header bar
-        const headerH = 24
-        ctx.fillStyle = statusColor + '10'
-        ctx.beginPath()
-        ctx.roundRect(panelX, panelY, panelW, headerH, [10, 10, 0, 0])
-        ctx.fill()
+      ctx.save()
+      ctx.fillStyle = THEME.cardBg
+      ctx.strokeStyle = THEME.cardBorder
+      ctx.lineWidth = 1
 
-        ctx.fillStyle = statusColor
-        ctx.font = 'bold 9px Inter, monospace'
-        ctx.fillText(`SCAN #${face.debug.tracker_id}`, panelX + 10, panelY + 15)
+      ctx.beginPath()
+      ctx.roundRect(cardX, cardY, cardW, cardH, 12)
+      ctx.fill()
+      ctx.stroke()
 
-        // Divider
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)'
-        ctx.lineWidth = 1
-        ctx.beginPath()
-        ctx.moveTo(panelX, panelY + headerH)
-        ctx.lineTo(panelX + panelW, panelY + headerH)
-        ctx.stroke()
+      ctx.font = 'bold 15px system-ui, -apple-system, sans-serif'
+      ctx.fillStyle = THEME.text
+      ctx.fillText(face.name, cardX + 14, cardY + 24)
 
-        // ── Simplified 3-line stats ──
-        // Line 1: Status (plain English)
-        let displayStatus = 'Scanning...'
-        if (face.debug.status === 'FACE_STABLE') {
-          displayStatus = matched ? 'Matched ✓' : 'Unknown'
-        }
-        else if (face.debug.status === 'STABILIZING') displayStatus = 'Aligning...'
-        else if (face.debug.status === 'LIVENESS_CHECK') displayStatus = 'Blink to Verify'
-        else if (face.debug.status === 'SPOOF_DETECTED') displayStatus = 'Spoof Alert ✕'
-        else if (face.debug.status === 'FACE_ROTATED') displayStatus = 'Face Rotated'
+      ctx.font = '11px system-ui, -apple-system, sans-serif'
+      const emotion = estimateEmotion(face.landmarks)
+      const statusText = face.matched
+        ? (face.attendance_status === 'already_marked_today' ? 'ALREADY PUNCHED' : 'VERIFIED')
+        : 'UNMATCHED'
+      const statusColor = face.matched ? THEME.accent : THEME.danger
+      
+      ctx.fillStyle = statusColor
+      ctx.fillText(statusText, cardX + 14, cardY + 40)
 
-        // Line 2: Real-time geometric emotion estimate
-        const emotionVal = estimateEmotion(face.kpss)
+      if (activeDebug.active && activeDebug.measurements) {
+        ctx.fillStyle = THEME.textDim
+        ctx.fillText(`Dist: ${face.distance} | Exp: ${emotion}`, cardX + 14, cardY + 56)
 
-        // Line 3: Head tilt angle in degrees
-        const rawAngle = face.debug.eye_angle || 0
-        const displayAngle = `${rawAngle > 0 ? '+' : ''}${rawAngle.toFixed(1)}°`
-        // 100% alignment score at 0 degrees, down to 0% at 20 degrees tilt
-        const alignmentScore = Math.max(0, 20 - Math.min(20, Math.abs(rawAngle))) / 20
+        const barY = cardY + 66
+        const barW = cardW - 28
+        ctx.fillStyle = 'rgba(255,255,255,0.1)'
+        ctx.fillRect(cardX + 14, barY, barW, 4)
 
-        const drawSimpleRow = (label, val, lineNum, barVal) => {
-          const lineY = panelY + headerH + 16 + (lineNum * 18)
-          
-          // Label
-          ctx.fillStyle = THEME.textDim
-          ctx.font = 'bold 9px Inter, monospace'
-          ctx.fillText(label, panelX + 10, lineY)
-          
-          // Value
-          const isStatusLine = lineNum === 0
-          ctx.fillStyle = isStatusLine ? statusColor : THEME.text
-          ctx.font = isStatusLine ? 'bold 10px Inter, sans-serif' : '10px monospace'
-          ctx.fillText(val, panelX + 70, lineY)
+        ctx.fillStyle = color
+        ctx.fillRect(cardX + 14, barY, barW * (face.confidence / 100), 4)
+      } else {
+        const barY = cardY + 54
+        const barW = cardW - 28
+        ctx.fillStyle = 'rgba(255,255,255,0.1)'
+        ctx.fillRect(cardX + 14, barY, barW, 4)
 
-          // Progress bar (only drawn if barVal is specified)
-          if (barVal !== undefined) {
-            const barX = panelX + 135
-            const barW = 55
-            const barH = 4
-            const barY = lineY - 5
-
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.05)'
-            ctx.beginPath()
-            ctx.roundRect(barX, barY, barW, barH, 2)
-            ctx.fill()
-
-            ctx.fillStyle = statusColor
-            ctx.beginPath()
-            ctx.roundRect(barX, barY, barW * Math.min(1, Math.max(0, barVal)), barH, 2)
-            ctx.fill()
-          }
-        }
-
-        drawSimpleRow('Status', displayStatus, 0)
-        drawSimpleRow('Emotion', emotionVal, 1)
-        drawSimpleRow('Angle', displayAngle, 2, alignmentScore)
+        ctx.fillStyle = color
+        ctx.fillRect(cardX + 14, barY, barW * (face.confidence / 100), 4)
       }
+
+      ctx.restore()
     })
-  }, [videoRef, mirrored, scanning])
 
-  const doScan = useCallback(async () => {
-    if (!isActive || inFlightRef.current) return
-    const frame = captureFrame(0.58, 0, scannerFrameMaxWidth)
-    if (!frame) return
+    if (activeDebug.active && activeDebug.fps) {
+      ctx.save()
+      ctx.font = '12px monospace'
+      ctx.fillStyle = THEME.textDim
+      ctx.fillText(`API Rate: ${currentScanRate.current} fps`, 14, canvas.height - 14)
+      ctx.restore()
+    }
+  }, [mirrored, THEME])
 
+  const processFrame = useCallback(async () => {
+    if (!isActive || inFlightRef.current || !scanningRef.current) return
     inFlightRef.current = true
+
+    const frameB64 = captureFrame(scannerFrameMaxWidth)
+    if (!frameB64) {
+      inFlightRef.current = false
+      return
+    }
+
     try {
-      const res = await recognizeFace(frame, selectedSession || null, true, scannerIdRef.current)
+      const res = await recognizeFace(frameB64, null, true, scannerIdRef.current)
       const processed = res.data.faces || []
 
       processed.forEach(face => {
@@ -418,9 +344,8 @@ export default function Scanner() {
         }
       })
 
-      // Store in ref for continuous 60fps render loop
       latestFacesRef.current = processed
-      scanCount.current += 1  // Track real scan rate
+      scanCount.current += 1
 
       if (processed.length > 0) {
         lastMotionRef.current = Date.now()
@@ -445,7 +370,7 @@ export default function Scanner() {
             out_time: f.out_time,
             target_hours: f.target_hours
           }
-          setNotifications(n => [note, ...n].slice(0, 5))
+          setNotifications(n => [note, ...n].slice(0, 10))
         })
       }
     } catch {
@@ -453,15 +378,14 @@ export default function Scanner() {
     } finally {
       inFlightRef.current = false
     }
-  }, [isActive, captureFrame, selectedSession])
+  }, [isActive, captureFrame])
 
   const handleStart = async () => {
     scannerIdRef.current = `scanner-${Date.now()}-${Math.random().toString(36).slice(2)}`
     inFlightRef.current = false
     markedRef.current = new Set()
-    setMarkedCount(0)
-    setNotifications([])
-    latestFacesRef.current = [] // clear faces ref
+    latestFacesRef.current = []
+    loadTodayAttendance()
     const started = await startCamera(selectedCamera || null)
     setScanning(!!started)
   }
@@ -470,186 +394,70 @@ export default function Scanner() {
     stopCamera()
     setScanning(false)
     clearInterval(intervalRef.current)
-    latestFacesRef.current = [] // clear faces ref
+    latestFacesRef.current = []
     if (overlayRef.current) {
       const ctx = overlayRef.current.getContext('2d')
       ctx?.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height)
     }
+    loadTodayAttendance()
   }
 
-  // Continuous rendering loop for 60fps HUD animations
   useEffect(() => {
     let animId
-    const render = () => {
-      const faces = latestFacesRef.current
-      
-      let targetScale = 1.0
-      let targetTx = 0.0
-      let targetTy = 0.0
-
-      if (faces && faces.length > 0) {
-        // Find bounding box enclosing all faces
-        let minLeft = 1.0
-        let minTop = 1.0
-        let maxRight = 0.0
-        let maxBottom = 0.0
-        let validFacesCount = 0
-
-        faces.forEach(f => {
-          if (f.box) {
-            minLeft = Math.min(minLeft, f.box.left ?? 0)
-            minTop = Math.min(minTop, f.box.top ?? 0)
-            maxRight = Math.max(maxRight, f.box.right ?? 1)
-            maxBottom = Math.max(maxBottom, f.box.bottom ?? 1)
-            validFacesCount++
-          }
-        })
-
-        if (validFacesCount > 0) {
-          const centerX = (minLeft + maxRight) / 2
-          const centerY = (minTop + maxBottom) / 2
-          const combinedW = maxRight - minLeft
-          const combinedH = maxBottom - minTop
-
-          // Adjust zoom padding based on number of faces
-          // More padding for 1 face to keep it a comfortable size, less padding for multiple faces to keep them in view
-          const zoomPadding = validFacesCount > 1 ? 1.8 : 2.8
-          targetScale = 1.0 / Math.max(combinedW * zoomPadding, combinedH * zoomPadding)
-          
-          // Gentle max zoom of 1.45x for single face, and 1.2x for multiple faces
-          const maxScale = validFacesCount > 1 ? 1.2 : 1.45
-          targetScale = Math.max(1.0, Math.min(maxScale, targetScale))
-
-          // Apply visual coordinate space based on whether feed is mirrored
-          const visualCenterX = mirrored ? (1.0 - centerX) : centerX
-
-          const video = videoRef.current
-          if (video) {
-            const vWidth = video.videoWidth || 640
-            const vHeight = video.videoHeight || 480
-            const cWidth = video.clientWidth || 640
-            const cHeight = video.clientHeight || 480
-
-            const vRatio = vWidth / vHeight
-            const cRatio = cWidth / cHeight
-
-            let drawW, drawH, offsetX, offsetY
-            if (cRatio > vRatio) {
-              drawW = cWidth
-              drawH = cWidth / vRatio
-              offsetX = 0
-              offsetY = (cHeight - drawH) / 2
-            } else {
-              drawH = cHeight
-              drawW = cHeight * vRatio
-              offsetX = (cWidth - drawW) / 2
-              offsetY = 0
-            }
-
-            const rawX = offsetX + visualCenterX * drawW
-            const rawY = offsetY + centerY * drawH
-
-            // Translate zoomWrapperRef by targetScale * distance from center
-            targetTx = (0.5 - rawX / cWidth) * targetScale * 100
-            targetTy = (0.5 - rawY / cHeight) * targetScale * 100
-
-            // Clamp translation to prevent black bars at edges
-            const maxTx = Math.max(0, (targetScale - 1) * 50)
-            const maxTy = Math.max(0, (targetScale - 1) * 50)
-            targetTx = Math.max(-maxTx, Math.min(maxTx, targetTx))
-            targetTy = Math.max(-maxTy, Math.min(maxTy, targetTy))
-          }
-        }
-      }
-
-      // Smooth interpolation using a lerp factor of 0.08 (takes ~15-20 frames to settle)
-      const lerp = 0.08
-      currentScaleRef.current += (targetScale - currentScaleRef.current) * lerp
-      currentTxRef.current += (targetTx - currentTxRef.current) * lerp
-      currentTyRef.current += (targetTy - currentTyRef.current) * lerp
-
-      // Directly update style transform on wrapper element for maximum performance
-      if (zoomWrapperRef.current) {
-        zoomWrapperRef.current.style.transform = `translate3d(${currentTxRef.current.toFixed(2)}%, ${currentTyRef.current.toFixed(2)}%, 0) scale(${currentScaleRef.current.toFixed(4)})`
-      }
-
-      drawBoxes(faces)
-      animId = requestAnimationFrame(render)
+    const loop = () => {
+      drawBoxes(latestFacesRef.current)
+      animId = requestAnimationFrame(loop)
     }
+    if (scanning) {
+      animId = requestAnimationFrame(loop)
+    }
+    return () => cancelAnimationFrame(animId)
+  }, [scanning, drawBoxes])
 
-    if (scanning && isActive) {
-      animId = requestAnimationFrame(render)
-    } else {
-      const canvas = overlayRef.current
-      if (canvas) {
-        const ctx = canvas.getContext('2d')
-        ctx?.clearRect(0, 0, canvas.width, canvas.height)
-      }
-      if (zoomWrapperRef.current) {
-        zoomWrapperRef.current.style.transform = 'translate3d(0, 0, 0) scale(1)'
-      }
-      currentScaleRef.current = 1.0
-      currentTxRef.current = 0.0
-      currentTyRef.current = 0.0
-    }
-    return () => {
-      cancelAnimationFrame(animId)
-    }
-  }, [scanning, isActive, drawBoxes, mirrored])
+  useEffect(() => {
+    if (!scanning) return
+    const fpsTimer = setInterval(() => {
+      const elapsed = (Date.now() - lastScanTime.current) / 1000
+      currentScanRate.current = (scanCount.current / elapsed).toFixed(1)
+      scanCount.current = 0
+      lastScanTime.current = Date.now()
+    }, 1000)
+    return () => clearInterval(fpsTimer)
+  }, [scanning])
 
   useEffect(() => {
     if (scanning && isActive) {
-      intervalRef.current = setInterval(doScan, scannerIntervalMs)
+      intervalRef.current = setInterval(processFrame, scannerIntervalMs)
     } else {
       clearInterval(intervalRef.current)
     }
     return () => clearInterval(intervalRef.current)
-  }, [scanning, isActive, doScan])
+  }, [scanning, isActive, processFrame, scannerIntervalMs])
 
-  const [isSleeping, setIsSleeping] = useState(false)
-  const lastMotionRef = useRef(Date.now())
-  const [bioScanning, setBioScanning] = useState(false)
-  const [bioMessage, setBioMessage] = useState('')
-  const [livePreviewSrc, setLivePreviewSrc] = useState(null)
-  const [sensorTouch, setSensorTouch] = useState(false)
-  const [visualizerError, setVisualizerError] = useState('')
-  const [waitingForLift, setWaitingForLift] = useState(false)
-  const isBioPollingRef = useRef(false)
-
-  const scanningRef = useRef(scanning)
   useEffect(() => {
     scanningRef.current = scanning
   }, [scanning])
 
-  // Continuous Biometric Verification Loop while scanner is running
+  // Biometric Futronic fingerprint polling loop
   useEffect(() => {
-    if (!scanning) {
-      setBioMessage('')
-      setLivePreviewSrc(null)
-      setSensorTouch(false)
-      return
-    }
-
+    if (!scanning) return
     let isMounted = true
 
     const runLoop = async () => {
-      // Small initial delay before starting loop
       await new Promise(r => setTimeout(r, 500))
+      setBioMessage('Waiting for finger touch...')
 
       while (isMounted && scanningRef.current) {
         setSensorTouch(false)
-        setBioMessage('Waiting for finger touch...')
         
         try {
-          // Call verify endpoint (which blocks in backend waiting for finger touch)
           const scanRes = await verifyBiometricScan({
-            session_id: selectedSession || null
+            session_id: null
           })
 
           if (!isMounted || !scanningRef.current) break
 
           if (scanRes.data.success && scanRes.data.attendance_marked) {
-            // Play success audio
             try {
               const playBeep = (freq, delay, dur) => {
                 const ctx = new (window.AudioContext || window.webkitAudioContext)()
@@ -682,17 +490,16 @@ export default function Scanner() {
                 out_time: scanRes.data.out_time,
                 target_hours: scanRes.data.target_hours
               },
-              ...prev.slice(0, 4)
+              ...prev.slice(0, 9)
             ])
 
-            // Wait 2.5 seconds before re-arming next scan
-            await new Promise(r => setTimeout(r, 2500))
+            await new Promise(r => setTimeout(r, 4000))
+            if (isMounted && scanningRef.current) setBioMessage('Waiting for finger touch...')
           } else if (scanRes.data.success && !scanRes.data.attendance_marked) {
-            // Verified fingerprint match, but punch blocked by cooldown / already completed
             setBioMessage(scanRes.data.message || `✓ Verified: ${scanRes.data.user.name} (Cooldown active: min 10 min wait between punches)`)
-            await new Promise(r => setTimeout(r, 2500))
+            await new Promise(r => setTimeout(r, 4000))
+            if (isMounted && scanningRef.current) setBioMessage('Waiting for finger touch...')
           } else {
-            // Play failure tone if it was a real non-match (not a simple timeout)
             if (scanRes.data.message && !scanRes.data.message.includes('timed out') && !scanRes.data.message.includes('No matching fingerprint')) {
               try {
                 const ctx = new (window.AudioContext || window.webkitAudioContext)()
@@ -708,7 +515,6 @@ export default function Scanner() {
               } catch {}
             }
             setBioMessage(scanRes.data.message || 'No match found. Try again.')
-            // Settle time before retrying
             await new Promise(r => setTimeout(r, 1000))
           }
         } catch (err) {
@@ -725,7 +531,7 @@ export default function Scanner() {
     return () => {
       isMounted = false
     }
-  }, [scanning, selectedSession])
+  }, [scanning])
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in">
@@ -735,207 +541,207 @@ export default function Scanner() {
           <p className="section-subtitle">Real-time Biometric Attendance System</p>
         </div>
 
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-        <select
-          value={selectedSession}
-          onChange={e => setSelectedSession(e.target.value)}
-          className="select flex-1 sm:max-w-xs"
-          disabled={scanning}
-        >
-          <option value="">No Session (General)</option>
-          {sessions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-
-        <select
-          value={selectedCamera}
-          onChange={e => setSelectedCamera(e.target.value)}
-          className="select flex-1 sm:max-w-xs"
-          disabled={scanning}
-        >
-          <option value="">Default Camera</option>
-          {devices.map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${i + 1}`}</option>)}
-        </select>
-
-        {!scanning ? (
-          <button id="start-scanner-btn" onClick={handleStart} className="btn-primary py-3 px-6 text-base gap-2">
-            <Camera size={20} /> Start Scanner
-          </button>
-        ) : (
-          <button id="stop-scanner-btn" onClick={handleStop} className="btn-danger py-3 px-6 text-base gap-2">
-            <CameraOff size={20} /> Stop Scanner
-          </button>
-        )}
-
-        <button
-          onClick={() => setMirrored(!mirrored)}
-          className={`btn-secondary py-3 px-4 ${mirrored ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/50' : ''}`}
-          title="Toggle Mirror View (Flip Box)"
-        >
-          <Zap size={20} className={mirrored ? 'fill-current' : ''} />
-          <span className="hidden sm:inline ml-2">{mirrored ? 'Mirrored' : 'Direct'}</span>
-        </button>
-
-        {scanning && (
-          <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
-            <UserCheck size={16} className="text-emerald-400" />
-            <span className="text-sm text-emerald-300 font-semibold">{markedCount} marked</span>
-          </div>
-        )}
-
-        <button
-          onClick={() => toggleDebug('active')}
-          className={`ml-auto btn-secondary p-3 ${debugToggles.active ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/50' : ''}`}
-          title="Toggle Debug Overlay"
-        >
-          <Activity size={20} />
-        </button>
-      </div>
-
-      {debugToggles.active && (
-        <div className="flex flex-wrap items-center gap-3 p-3 bg-slate-800/50 border border-slate-700/50 rounded-xl text-sm animate-fade-in">
-          <span className="text-slate-400 font-medium px-2">Debug Toggles:</span>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={debugToggles.landmarks} onChange={() => toggleDebug('landmarks')} className="rounded bg-slate-700 border-slate-600 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-slate-800" />
-            <span className="text-slate-300">Landmarks</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={debugToggles.measurements} onChange={() => toggleDebug('measurements')} className="rounded bg-slate-700 border-slate-600 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-slate-800" />
-            <span className="text-slate-300">Measurements</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={debugToggles.fps} onChange={() => toggleDebug('fps')} className="rounded bg-slate-700 border-slate-600 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-slate-800" />
-            <span className="text-slate-300">FPS Counter</span>
-          </label>
-        </div>
-      )}
-
-      <div 
-        ref={containerRef}
-        className={`relative mx-auto bg-black ${isFullscreen ? 'w-screen h-screen flex items-center justify-center' : 'w-full rounded-2xl overflow-hidden border border-slate-700'}`}
-        style={isFullscreen ? {} : {
-          aspectRatio: '1.1 / 1',
-          maxWidth: 'min(650px, 82.5vh)',
-          maxHeight: '75vh'
-        }}
-      >
-        <div 
-          className="relative w-full h-full"
-          style={isFullscreen ? {
-            aspectRatio: '1.1 / 1',
-            maxWidth: 'min(100vw, 110vh)',
-            maxHeight: '100vh',
-            margin: '0 auto',
-            overflow: 'hidden',
-            border: '1px solid #334155',
-            borderRadius: '1rem'
-          } : {
-            width: '100%',
-            height: '100%'
-          }}
-        >
-          <div
-            ref={zoomWrapperRef}
-            className="absolute inset-0 origin-center"
-            style={{ transform: 'translate3d(0, 0, 0) scale(1)' }}
+        {/* Clean Controls Bar (Session Removed) */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <select
+            value={selectedCamera}
+            onChange={e => setSelectedCamera(e.target.value)}
+            className="select flex-1 sm:max-w-xs"
+            disabled={scanning}
           >
-            <video
-              ref={videoRef}
-              className="w-full h-full object-cover"
-              style={{
-                transform: mirrored ? 'scaleX(-1)' : 'none'
-              }}
-              muted
-              playsInline
-              autoPlay
-            />
-          </div>
-          <canvas ref={overlayRef} className="absolute inset-0 w-full h-full pointer-events-none" />
-          <canvas ref={canvasRef} className="hidden" />
+            <option value="">Default Camera</option>
+            {devices.map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${i + 1}`}</option>)}
+          </select>
 
-          {!isActive && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-slate-950">
-              <Camera size={56} className="text-slate-600" />
-              <p className="text-slate-500 text-lg font-medium">Camera offline</p>
-              <p className="text-slate-600 text-sm">Click Start Scanner to begin</p>
-            </div>
+          {!scanning ? (
+            <button id="start-scanner-btn" onClick={handleStart} className="btn-primary py-3 px-6 text-base gap-2">
+              <Camera size={20} /> Start Scanner
+            </button>
+          ) : (
+            <button id="stop-scanner-btn" onClick={handleStop} className="btn-danger py-3 px-6 text-base gap-2">
+              <CameraOff size={20} /> Stop Scanner
+            </button>
           )}
+
+          <button
+            onClick={() => setMirrored(!mirrored)}
+            className={`btn-secondary py-3 px-4 ${mirrored ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/50' : ''}`}
+            title="Toggle Mirror View (Flip Box)"
+          >
+            <Zap size={20} className={mirrored ? 'fill-current' : ''} />
+            <span className="hidden sm:inline ml-2">{mirrored ? 'Mirrored' : 'Direct'}</span>
+          </button>
 
           {scanning && (
-            <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/60 backdrop-blur-sm rounded-full px-3 py-1.5 z-20">
-              <span className={`w-2 h-2 rounded-full ${isSleeping ? 'bg-amber-400 animate-ping' : 'bg-red-500 animate-pulse'}`} />
-              <span className="text-xs font-semibold text-white">{isSleeping ? 'STANDBY' : 'LIVE SCANNER'}</span>
-            </div>
-          )}
-
-          {scanning && isSleeping && (
-            <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-[2px] flex flex-col items-center justify-center pointer-events-none animate-fade-in z-10">
-              <div className="p-4 rounded-2xl bg-slate-900/90 border border-cyan-500/30 text-center space-y-2 max-w-xs shadow-2xl">
-                <div className="w-12 h-12 mx-auto rounded-full bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
-                  <Activity size={24} className="animate-pulse" />
-                </div>
-                <h4 className="text-sm font-bold text-slate-100 uppercase tracking-wider">System Standby</h4>
-                <p className="text-xs text-slate-400">Approach camera to activate</p>
-              </div>
+            <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+              <UserCheck size={16} className="text-emerald-400" />
+              <span className="text-sm text-emerald-300 font-semibold">{markedCount} marked</span>
             </div>
           )}
 
           <button
-            onClick={toggleFullscreen}
-            className="absolute bottom-4 right-4 z-10 p-2.5 rounded-xl bg-black/60 hover:bg-black/80 text-white border border-slate-700/50 backdrop-blur-sm shadow-lg transition-all"
-            title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+            onClick={() => toggleDebug('active')}
+            className={`ml-auto btn-secondary p-3 ${debugToggles.active ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/50' : ''}`}
+            title="Toggle Debug Overlay"
           >
-            {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+            <Activity size={20} />
           </button>
+        </div>
 
-          {error && (
-            <div className="absolute bottom-4 left-4 right-4 p-3 bg-rose-950/90 border border-rose-700/50 rounded-xl text-rose-300 text-sm">
-              {error}
-            </div>
-          )}
+        {debugToggles.active && (
+          <div className="flex flex-wrap items-center gap-3 p-3 bg-slate-800/50 border border-slate-700/50 rounded-xl text-sm animate-fade-in">
+            <span className="text-slate-400 font-medium px-2">Debug Toggles:</span>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={debugToggles.landmarks} onChange={() => toggleDebug('landmarks')} className="rounded bg-slate-700 border-slate-600 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-slate-800" />
+              <span className="text-slate-300">Landmarks</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={debugToggles.measurements} onChange={() => toggleDebug('measurements')} className="rounded bg-slate-700 border-slate-600 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-slate-800" />
+              <span className="text-slate-300">Measurements</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={debugToggles.fps} onChange={() => toggleDebug('fps')} className="rounded bg-slate-700 border-slate-600 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-slate-800" />
+              <span className="text-slate-300">FPS Counter</span>
+            </label>
+          </div>
+        )}
 
-          {scanning && (
-            <div className="absolute bottom-4 left-4 z-20 flex flex-col items-start gap-2 max-w-[200px] pointer-events-none">
-              {livePreviewSrc && (
-                <div className="relative p-1 rounded-xl bg-slate-900/80 border-2 border-cyan-500/50 shadow-lg shadow-cyan-500/20 backdrop-blur-md animate-fade-in overflow-hidden">
-                  <div className="absolute inset-0 bg-cyan-500/20 animate-pulse pointer-events-none" />
-                  <img src={livePreviewSrc} alt="Live Fingerprint" className="w-20 h-[120px] object-cover rounded-lg filter contrast-125 sepia opacity-80 mix-blend-screen" />
-                </div>
-              )}
-              {(bioMessage || sensorTouch) && (
-                <div className="px-3 py-2 bg-slate-900/90 border border-cyan-500/30 rounded-lg shadow-lg backdrop-blur-sm flex items-center gap-2 animate-fade-in">
-                  <Fingerprint size={16} className={sensorTouch ? "text-cyan-400 animate-pulse" : "text-slate-400"} />
-                  <span className={`text-[10px] font-bold uppercase tracking-wider ${sensorTouch ? 'text-cyan-300' : 'text-slate-400'}`}>
-                    {bioMessage || (sensorTouch ? 'Scanning...' : 'Ready')}
-                  </span>
-                </div>
-              )}
+        <div 
+          ref={containerRef}
+          className={`relative mx-auto bg-black ${isFullscreen ? 'w-screen h-screen flex items-center justify-center' : 'w-full rounded-2xl overflow-hidden border border-slate-700'}`}
+          style={isFullscreen ? {} : {
+            aspectRatio: '1.1 / 1',
+            maxWidth: 'min(650px, 82.5vh)',
+            maxHeight: '75vh'
+          }}
+        >
+          <div 
+            className="relative w-full h-full"
+            style={isFullscreen ? {
+              aspectRatio: '1.1 / 1',
+              maxWidth: 'min(100vw, 110vh)',
+              maxHeight: '100vh',
+              margin: '0 auto',
+              overflow: 'hidden',
+              border: '1px solid #334155',
+              borderRadius: '1rem'
+            } : {
+              width: '100%',
+              height: '100%'
+            }}
+          >
+            <div
+              ref={zoomWrapperRef}
+              className="absolute inset-0 origin-center"
+              style={{ transform: 'translate3d(0, 0, 0) scale(1)' }}
+            >
+              <video
+                ref={videoRef}
+                className="w-full h-full object-cover"
+                style={{
+                  transform: mirrored ? 'scaleX(-1)' : 'none'
+                }}
+                muted
+                playsInline
+                autoPlay
+              />
             </div>
-          )}
+            <canvas ref={overlayRef} className="absolute inset-0 w-full h-full pointer-events-none" />
+            <canvas ref={canvasRef} className="hidden" />
+
+            {!isActive && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-slate-950">
+                <Camera size={56} className="text-slate-600" />
+                <p className="text-slate-500 text-lg font-medium">Camera offline</p>
+                <p className="text-slate-600 text-sm">Click Start Scanner to begin</p>
+              </div>
+            )}
+
+            {scanning && (
+              <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/60 backdrop-blur-sm rounded-full px-3 py-1.5 z-20">
+                <span className={`w-2 h-2 rounded-full ${isSleeping ? 'bg-amber-400 animate-ping' : 'bg-red-500 animate-pulse'}`} />
+                <span className="text-xs font-semibold text-white">{isSleeping ? 'STANDBY' : 'LIVE SCANNER'}</span>
+              </div>
+            )}
+
+            {scanning && isSleeping && (
+              <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-[2px] flex flex-col items-center justify-center pointer-events-none animate-fade-in z-10">
+                <div className="p-4 rounded-2xl bg-slate-900/90 border border-cyan-500/30 text-center space-y-2 max-w-xs shadow-2xl">
+                  <div className="w-12 h-12 mx-auto rounded-full bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+                    <Activity size={24} className="animate-pulse" />
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-100 uppercase tracking-wider">System Standby</h4>
+                  <p className="text-xs text-slate-400">Approach camera to activate</p>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={toggleFullscreen}
+              className="absolute bottom-4 right-4 z-10 p-2.5 rounded-xl bg-black/60 hover:bg-black/80 text-white border border-slate-700/50 backdrop-blur-sm shadow-lg transition-all"
+              title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+            >
+              {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+            </button>
+
+            {error && (
+              <div className="absolute bottom-4 left-4 right-4 p-3 bg-rose-950/90 border border-rose-700/50 rounded-xl text-rose-300 text-sm">
+                {error}
+              </div>
+            )}
+
+            {scanning && (
+              <div className="absolute bottom-4 left-4 z-20 flex flex-col items-start gap-2 max-w-[220px] pointer-events-none">
+                {livePreviewSrc && (
+                  <div className="relative p-1 rounded-xl bg-slate-900/80 border-2 border-cyan-500/50 shadow-lg shadow-cyan-500/20 backdrop-blur-md animate-fade-in overflow-hidden">
+                    <div className="absolute inset-0 bg-cyan-500/20 animate-pulse pointer-events-none" />
+                    <img src={livePreviewSrc} alt="Live Fingerprint" className="w-20 h-[120px] object-cover rounded-lg filter contrast-125 sepia opacity-80 mix-blend-screen" />
+                  </div>
+                )}
+                {(bioMessage || sensorTouch) && (
+                  <div className="px-3 py-2 bg-slate-900/90 border border-cyan-500/30 rounded-lg shadow-lg backdrop-blur-sm flex items-center gap-2 animate-fade-in">
+                    <Fingerprint size={16} className={sensorTouch ? "text-cyan-400 animate-pulse" : "text-slate-400"} />
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${sensorTouch ? 'text-cyan-300' : 'text-slate-400'}`}>
+                      {bioMessage || (sensorTouch ? 'Scanning...' : 'Ready')}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
-      </div>
 
-        {/* Right Column: Attendance Feed */}
-        <div className="lg:col-span-1 flex flex-col lg:mt-24">
-          <div className="card p-4 bg-slate-900/80 border border-slate-700/50 flex-1 overflow-hidden flex flex-col">
-            <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-800">
+      {/* Right Column: Attendance Feed */}
+      <div className="lg:col-span-1 flex flex-col lg:mt-24">
+        <div className="card p-4 bg-slate-900/80 border border-slate-700/50 flex-1 overflow-hidden flex flex-col">
+          <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
+            <div className="flex items-center gap-2">
               <Activity className="text-cyan-400" size={18} />
               <h2 className="text-sm font-bold text-slate-100 tracking-wide uppercase">Live Attendance Feed</h2>
             </div>
-            <div className="flex-1 overflow-y-auto flex flex-col gap-4 pr-2" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-              {notifications.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2 opacity-50">
-                  <UserCheck size={32} />
-                  <p className="text-xs font-medium uppercase tracking-wider">Waiting for scans...</p>
-                </div>
-              ) : (
-                notifications.map((n, idx) => {
-                  const photoUrl = n.photo ? (n.photo.startsWith('http') || n.photo.startsWith('data:') ? n.photo : `/storage/${n.photo}`) : null;
-                  const inTimeStr = n.in_time ? new Date(n.in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
-                  const outTimeStr = n.out_time ? new Date(n.out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
+            <button
+              onClick={loadTodayAttendance}
+              className="text-xs text-slate-500 hover:text-cyan-400 flex items-center gap-1 transition-colors"
+              title="Refresh Today's Records"
+            >
+              <RefreshCw size={12} /> Sync
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto flex flex-col gap-4 pr-2" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+            {notifications.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2 opacity-50">
+                <UserCheck size={32} />
+                <p className="text-xs font-medium uppercase tracking-wider">No scans today yet</p>
+              </div>
+            ) : (
+              notifications.map((n, idx) => {
+                const photoUrl = n.photo ? (n.photo.startsWith('http') || n.photo.startsWith('data:') ? n.photo : `/storage/${n.photo}`) : null;
+                const inTimeStr = n.in_time ? new Date(n.in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
+                const outTimeStr = n.out_time ? new Date(n.out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
 
-                  return (
-                  <div key={n.id} className="flex-shrink-0 flex items-center gap-5 p-5 bg-gradient-to-r from-slate-900/90 via-slate-800/80 to-slate-900/90 rounded-2xl border border-slate-700/60 shadow-xl backdrop-blur-md hover:border-cyan-500/40 transition-all animate-slide-up min-h-[110px]" style={{ animationDelay: `${idx * 50}ms` }}>
+                return (
+                  <div key={n.id || idx} className="flex-shrink-0 flex items-center gap-5 p-5 bg-gradient-to-r from-slate-900/90 via-slate-800/80 to-slate-900/90 rounded-2xl border border-slate-700/60 shadow-xl backdrop-blur-md hover:border-cyan-500/40 transition-all animate-slide-up min-h-[110px]" style={{ animationDelay: `${idx * 50}ms` }}>
                     <div className="relative flex-shrink-0">
                       {photoUrl ? (
                         <img 
@@ -979,11 +785,12 @@ export default function Scanner() {
                       </div>
                     </div>
                   </div>
-                )})
-              )}
-            </div>
+                )
+              })
+            )}
           </div>
         </div>
       </div>
+    </div>
   )
 }
