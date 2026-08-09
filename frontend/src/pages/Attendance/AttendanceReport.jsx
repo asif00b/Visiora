@@ -51,10 +51,14 @@ export default function AttendanceReport() {
     handleLoad(reset)
   }
 
-  const handleExport = () => {
-    const params = Object.fromEntries(Object.entries(filters).filter(([, v]) => v))
-    exportCSV(params)
-    toast.success('Attendance CSV export initiated')
+  const handleExport = async () => {
+    try {
+      const params = Object.fromEntries(Object.entries(filters).filter(([, v]) => v))
+      await exportCSV(params)
+      toast.success('Attendance CSV downloaded successfully!')
+    } catch {
+      toast.error('Failed to download CSV report')
+    }
   }
 
   const handlePrint = () => {
