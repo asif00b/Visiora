@@ -154,7 +154,7 @@ export default function ProfileRequests() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by student name, ID, email or requested info..."
+            placeholder="Search by user name, ID, email or requested info..."
             className="input pl-10 w-full text-sm"
           />
           {searchQuery && (

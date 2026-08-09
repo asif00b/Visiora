@@ -257,7 +257,7 @@ export default function TrainModel() {
               {stats.untrained_names.join(', ')}{stats.untrained_users > 10 ? '…' : ''}
             </p>
             <p className="text-xs text-slate-600 mt-1">
-              Register faces via <strong className="text-slate-400">Student Profile → Face Management</strong>, or upload a dataset ZIP below.
+              Register faces via <strong className="text-slate-400">User Profile → Face Management</strong>, or upload a dataset ZIP below.
             </p>
           </div>
         </div>

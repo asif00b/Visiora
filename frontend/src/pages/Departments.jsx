@@ -78,7 +78,7 @@ export default function Departments() {
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="label">Name *</label>
-            <input value={newName} onChange={e => setNewName(e.target.value)} className="input" placeholder="Computer Science" required />
+            <input value={newName} onChange={e => setNewName(e.target.value)} className="input" placeholder="e.g. Human Resources" required />
           </div>
           <div>
             <label className="label">Description</label>
