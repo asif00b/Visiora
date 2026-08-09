@@ -94,8 +94,9 @@ export default function AttendanceReport() {
   const presentCount = records.filter(r => r.status === 'present').length
   const lateCount = records.filter(r => r.status === 'late').length
   const manualCount = records.filter(r => r.status === 'manual').length
-  const coreSatisfiedCount = records.filter(r => r.is_core_hours_satisfied !== false).length
-  const coreComplianceRate = totalRecords > 0 ? Math.round((coreSatisfiedCount / totalRecords) * 100) : 100
+  
+  const totalPunches = presentCount + lateCount
+  const punctualityRate = totalPunches > 0 ? Math.round((presentCount / totalPunches) * 100) : 100
 
   return (
     <div className="space-y-6 animate-fade-in print:p-0 print:m-0 print:bg-white print:text-black">
@@ -106,7 +107,7 @@ export default function AttendanceReport() {
         <div>
           <h1 className="section-title">Attendance Report</h1>
           <p className="section-subtitle">
-            Comprehensive log of all biometric punches, work hours, and schedule compliance
+            Comprehensive log of all biometric punches, work hours, and arrival punctuality
           </p>
         </div>
         <div className="flex flex-wrap gap-2.5">
@@ -157,11 +158,11 @@ export default function AttendanceReport() {
 
         <div className="card p-4 flex items-center gap-4 bg-slate-900/60 border-slate-800">
           <div className="w-11 h-11 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 flex-shrink-0">
-            <Award size={20} />
+            <Clock size={20} />
           </div>
           <div>
-            <p className="text-xs text-slate-400 font-medium">Core Hours Compliance</p>
-            <p className="text-xl font-bold text-amber-400">{coreComplianceRate}%</p>
+            <p className="text-xs text-slate-400 font-medium">Punctuality Rate</p>
+            <p className="text-xl font-bold text-amber-400">{punctualityRate}% On-Time</p>
           </div>
         </div>
       </div>

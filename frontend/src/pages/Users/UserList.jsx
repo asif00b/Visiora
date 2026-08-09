@@ -269,34 +269,14 @@ export default function UserList() {
                 <p className="font-semibold text-slate-300 flex items-center gap-1.5">
                   <Clock size={14} className="text-cyan-400" /> Work Schedule Rules
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="label">Must Check In By</label>
-                    <input
-                      type="time"
-                      value={editUser.must_check_in_time || ''}
-                      onChange={e => setEditUser(f => ({ ...f, must_check_in_time: e.target.value }))}
-                      className="input"
-                    />
-                  </div>
-                  <div>
-                    <label className="label">Core Hours Start</label>
-                    <input
-                      type="time"
-                      value={editUser.must_be_in_start || ''}
-                      onChange={e => setEditUser(f => ({ ...f, must_be_in_start: e.target.value }))}
-                      className="input"
-                    />
-                  </div>
-                  <div>
-                    <label className="label">Core Hours End</label>
-                    <input
-                      type="time"
-                      value={editUser.must_be_in_end || ''}
-                      onChange={e => setEditUser(f => ({ ...f, must_be_in_end: e.target.value }))}
-                      className="input"
-                    />
-                  </div>
+                <div>
+                  <label className="label">Must Check In By (Check-in Deadline)</label>
+                  <input
+                    type="time"
+                    value={editUser.must_check_in_time || ''}
+                    onChange={e => setEditUser(f => ({ ...f, must_check_in_time: e.target.value }))}
+                    className="input max-w-xs"
+                  />
                 </div>
               </div>
 

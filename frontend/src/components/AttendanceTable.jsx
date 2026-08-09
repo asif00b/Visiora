@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, CheckCircle2, AlertTriangle, Clock } from 'lucide-react'
+import { ChevronLeft, ChevronRight, CheckCircle2, Clock, ShieldCheck, XCircle } from 'lucide-react'
 import { useState } from 'react'
 import { format } from 'date-fns'
 
@@ -48,7 +48,7 @@ export default function AttendanceTable({ records = [], loading = false }) {
               <th>Punch Out</th>
               <th>Hours Worked</th>
               <th>Status</th>
-              <th>Core Hours</th>
+              <th>Punctuality Info</th>
               <th>Marked By</th>
             </tr>
           </thead>
@@ -59,7 +59,6 @@ export default function AttendanceTable({ records = [], loading = false }) {
               const userIdCode = rec.user_student_id || rec.user?.student_id || '—'
               const checkInStr = rec.timestamp ? format(new Date(rec.timestamp), 'dd MMM yyyy, hh:mm:ss a') : '—'
               const punchOutStr = rec.punch_out ? format(new Date(rec.punch_out), 'hh:mm:ss a') : '—'
-              const isSatisfied = rec.is_core_hours_satisfied !== false
 
               return (
                 <tr key={rec.id}>
@@ -89,13 +88,21 @@ export default function AttendanceTable({ records = [], loading = false }) {
                     </span>
                   </td>
                   <td>
-                    {isSatisfied ? (
-                      <span className="badge badge-success text-[10px] flex items-center gap-1 font-semibold">
-                        <CheckCircle2 size={10} /> Satisfied
+                    {rec.status === 'late' ? (
+                      <span className="badge badge-warning text-[10px] flex items-center gap-1 font-bold">
+                        <Clock size={10} /> Late Arrival
+                      </span>
+                    ) : rec.status === 'present' ? (
+                      <span className="badge badge-success text-[10px] flex items-center gap-1 font-bold">
+                        <CheckCircle2 size={10} /> On-Time Punch
+                      </span>
+                    ) : rec.status === 'manual' ? (
+                      <span className="badge badge-info text-[10px] flex items-center gap-1 font-bold">
+                        <ShieldCheck size={10} /> Manual Entry
                       </span>
                     ) : (
-                      <span className="badge badge-warning text-[10px] flex items-center gap-1 font-semibold">
-                        <AlertTriangle size={10} /> Violation
+                      <span className="badge badge-error text-[10px] flex items-center gap-1 font-bold">
+                        <XCircle size={10} /> Absent
                       </span>
                     )}
                   </td>
