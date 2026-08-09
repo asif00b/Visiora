@@ -171,7 +171,14 @@ def _seed_defaults():
 
     try:
         if not Department.query.first():
-            db.session.add(Department(name="General"))
+            corp_depts = [
+                Department(name="General"),
+                Department(name="Software Engineering & IT"),
+                Department(name="Human Resources"),
+                Department(name="Finance & Accounting"),
+                Department(name="Operations & Logistics"),
+            ]
+            db.session.add_all(corp_depts)
             db.session.commit()
 
         default_dept = Department.query.first()

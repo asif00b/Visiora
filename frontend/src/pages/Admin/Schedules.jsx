@@ -19,8 +19,12 @@ export default function Schedules() {
   // Bulk Edit inputs & toggles
   const [bulkTarget, setBulkTarget]       = useState('')
   const [bulkCheckIn, setBulkCheckIn]     = useState('')
-  const [updateTarget, setUpdateTarget]   = useState(false)
-  const [updateCheckIn, setUpdateCheckIn] = useState(false)
+  const [bulkInStart, setBulkInStart]     = useState('')
+  const [bulkInEnd, setBulkInEnd]         = useState('')
+
+  const [updateTarget, setUpdateTarget]     = useState(false)
+  const [updateCheckIn, setUpdateCheckIn]   = useState(false)
+  const [updateShiftHours, setUpdateShiftHours] = useState(false)
 
   const loadData = async () => {
     setLoading(true)
@@ -70,7 +74,7 @@ export default function Schedules() {
       return
     }
 
-    if (!updateTarget && !updateCheckIn) {
+    if (!updateTarget && !updateCheckIn && !updateShiftHours) {
       toast.warning('Select at least one setting to update')
       return
     }
@@ -85,6 +89,10 @@ export default function Schedules() {
       if (updateCheckIn) {
         payload.must_check_in_time = bulkCheckIn || null
       }
+      if (updateShiftHours) {
+        payload.must_be_in_start = bulkInStart || null
+        payload.must_be_in_end   = bulkInEnd || null
+      }
 
       const res = await updateBulkSchedule(payload)
       if (res.data.success) {
@@ -92,8 +100,11 @@ export default function Schedules() {
         setSelectedUserIds([])
         setUpdateTarget(false)
         setUpdateCheckIn(false)
+        setUpdateShiftHours(false)
         setBulkTarget('')
         setBulkCheckIn('')
+        setBulkInStart('')
+        setBulkInEnd('')
         loadData()
       }
     } catch (err) {
@@ -120,7 +131,7 @@ export default function Schedules() {
             <Sliders className="text-cyan-400" size={22} /> Targets & Schedules
           </h1>
           <p className="section-subtitle">
-            Configure weekly target hours and check-in deadlines for employees.
+            Configure weekly target hours, check-in deadlines, and mandatory shift presence hours.
           </p>
         </div>
       </div>
@@ -195,11 +206,16 @@ export default function Schedules() {
                       <th>Department</th>
                       <th className="text-center">Target (Hrs)</th>
                       <th className="text-center">Check-In Deadline</th>
+                      <th className="text-center">Required Shift Hours</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredUsers.map(u => {
                       const isSelected = selectedUserIds.includes(u.id)
+                      const shiftStr = u.must_be_in_start
+                        ? `${formatTime(u.must_be_in_start)} - ${formatTime(u.must_be_in_end)}`
+                        : '—'
+
                       return (
                         <tr
                           key={u.id}
@@ -223,6 +239,9 @@ export default function Schedules() {
                           </td>
                           <td className="text-center font-mono text-xs text-slate-300">
                             {formatTime(u.must_check_in_time)}
+                          </td>
+                          <td className="text-center font-mono text-xs text-slate-300">
+                            {shiftStr}
                           </td>
                         </tr>
                       )
@@ -288,6 +307,44 @@ export default function Schedules() {
                   onChange={e => setBulkCheckIn(e.target.value)}
                   className="input text-xs py-2 disabled:opacity-40 disabled:cursor-not-allowed"
                 />
+              </div>
+
+              {/* Required Shift Hours (Must be in) */}
+              <div className="space-y-2 pt-2 border-t border-slate-800/60">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="chk-shift"
+                    checked={updateShiftHours}
+                    onChange={e => setUpdateShiftHours(e.target.checked)}
+                    className="accent-cyan-500 cursor-pointer"
+                  />
+                  <label htmlFor="chk-shift" className="font-semibold text-slate-300 cursor-pointer select-none">
+                    Required Shift Hours (Must be in)
+                  </label>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="label text-[10px] text-slate-500 uppercase">Start Time</label>
+                    <input
+                      type="time"
+                      disabled={!updateShiftHours}
+                      value={bulkInStart}
+                      onChange={e => setBulkInStart(e.target.value)}
+                      className="input text-xs py-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                    />
+                  </div>
+                  <div>
+                    <label className="label text-[10px] text-slate-500 uppercase">End Time</label>
+                    <input
+                      type="time"
+                      disabled={!updateShiftHours}
+                      value={bulkInEnd}
+                      onChange={e => setBulkInEnd(e.target.value)}
+                      className="input text-xs py-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="pt-2">
