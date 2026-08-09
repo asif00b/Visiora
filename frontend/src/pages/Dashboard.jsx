@@ -545,11 +545,13 @@ export default function Dashboard() {
                       ) : (
                         stats.recent_activity.map((act) => {
                           const timeStr = act.timestamp ? new Date(act.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'
+                          const userName = act.user_name || act.user?.name || 'Unknown'
+                          const deptName = act.dept_name || act.user?.department?.name || 'General'
                           return (
                             <div key={act.id} className="flex items-center justify-between gap-3 p-2.5 rounded-lg bg-slate-800/40 border border-slate-700/30 hover:border-slate-700 transition-colors">
                               <div className="min-w-0">
-                                <p className="text-xs font-bold text-slate-200 truncate">{act.user?.name || 'Unknown'}</p>
-                                <p className="text-[10px] text-slate-500 truncate">{act.user?.department?.name || 'System'}</p>
+                                <p className="text-xs font-bold text-slate-200 truncate">{userName}</p>
+                                <p className="text-[10px] text-slate-500 truncate">{deptName}</p>
                               </div>
                               <div className="text-right flex-shrink-0">
                                 <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase border ${

@@ -51,12 +51,20 @@ class Attendance(db.Model):
     marked_by = db.relationship("User", foreign_keys=[marked_by_id])
 
     def to_dict(self):
+        u_name = self.user.name if self.user else None
+        d_name = self.user.department.name if (self.user and self.user.department) else None
         return {
             "id": self.id,
             "user_id": self.user_id,
-            "user_name": self.user.name if self.user else None,
+            "user_name": u_name,
             "user_student_id": self.user.student_id if self.user else None,
-            "dept_name": self.user.department.name if self.user and self.user.department else None,
+            "dept_name": d_name,
+            "user": {
+                "id": self.user_id,
+                "name": u_name,
+                "student_id": self.user.student_id if self.user else None,
+                "department": {"name": d_name} if d_name else None,
+            } if self.user else None,
             "session_id": self.session_id,
             "session_name": self.session.name if self.session else "General",
             "attendance_date": self.attendance_date.isoformat()
