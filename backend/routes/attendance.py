@@ -205,21 +205,24 @@ def export_csv():
         for r in records:
             try:
                 rows.append({
-                    'ID':          r.id,
-                    'User ID':     r.user.student_id  if r.user else '',
-                    'Name':        r.user.name        if r.user else '',
-                    'Department':  r.user.department.name if r.user and r.user.department else '',
-                    'Session':     r.session.name     if r.session else 'General',
-                    'Date':        r.timestamp.strftime('%Y-%m-%d') if r.timestamp else '',
-                    'Time':        r.timestamp.strftime('%H:%M:%S') if r.timestamp else '',
-                    'Status':      r.status,
-                    'Marked By':   r.marked_by.name   if r.marked_by else 'System',
+                    'ID':                   r.id,
+                    'User ID':              r.user.student_id  if r.user else '',
+                    'Name':                 r.user.name        if r.user else '',
+                    'Department':           r.user.department.name if r.user and r.user.department else '',
+                    'Session':              r.session.name     if r.session else 'General',
+                    'Check-In Date':        r.timestamp.strftime('%Y-%m-%d') if r.timestamp else '',
+                    'Check-In Time':        r.timestamp.strftime('%H:%M:%S') if r.timestamp else '',
+                    'Punch Out Time':       r.punch_out.strftime('%Y-%m-%d %H:%M:%S') if r.punch_out else '',
+                    'Hours Worked':         round(r.hours_worked or 0.0, 2),
+                    'Status':               r.status,
+                    'Core Hours Satisfied': 'Yes' if r.is_core_hours_satisfied else 'No',
+                    'Marked By':            r.marked_by.name   if r.marked_by else 'System',
                 })
             except Exception:
                 pass
 
         output = io.StringIO()
-        fields = ['ID', 'User ID', 'Name', 'Department', 'Session', 'Date', 'Time', 'Status', 'Marked By']
+        fields = ['ID', 'User ID', 'Name', 'Department', 'Session', 'Check-In Date', 'Check-In Time', 'Punch Out Time', 'Hours Worked', 'Status', 'Core Hours Satisfied', 'Marked By']
         writer = csv.DictWriter(output, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
