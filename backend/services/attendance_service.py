@@ -8,7 +8,7 @@ from database import db
 from models.attendance import Attendance
 
 
-DEFAULT_COOLDOWN_SECONDS = 60
+DEFAULT_COOLDOWN_SECONDS = 600
 _last_marked_at = {}
 _marked_day_cache = set()
 _locks = {}
@@ -57,7 +57,8 @@ def mark_attendance_once(
     day = now.date()
     cooldown = _configured_cooldown(cooldown_seconds)
 
-    cooldown_key = (user_id, session_id)
+    # Per-user cooldown key (shared across face, fingerprint, and all endpoints)
+    cooldown_key = user_id
 
     from models.user import User
     user = User.query.get(user_id)
@@ -65,8 +66,16 @@ def mark_attendance_once(
     with _user_lock(user_id):
         now_mono = time.monotonic()
         last_mono = _last_marked_at.get(cooldown_key)
-        if last_mono and now_mono - last_mono < 600:  # 10 minutes (600s) minimum between IN and OUT
-            return {"marked": False, "reason": "cooldown", "attendance": None}
+        if last_mono and (now_mono - last_mono) < cooldown:
+            remaining = int(cooldown - (now_mono - last_mono))
+            min_left = max(1, int((remaining + 59) // 60))
+            return {
+                "marked": False,
+                "reason": "cooldown",
+                "attendance": None,
+                "remaining_seconds": remaining,
+                "message": f"Cooldown active. Minimum {min_left} min wait between punches.",
+            }
 
         existing = attendance_for_session(user_id, session_id, now=now)
 

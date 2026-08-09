@@ -138,10 +138,10 @@ export default function AdminConfig() {
                 type="number"
                 min="10"
                 max="3600"
-                value={config['attendance_cooldown_seconds'] || '60'}
+                value={config['attendance_cooldown_seconds'] || '600'}
                 onChange={e => setValue('attendance_cooldown_seconds', e.target.value)}
                 className="input text-xs py-2"
-                placeholder="60"
+                placeholder="600"
               />
               <p className="text-[11px] text-slate-500">
                 Minimum wait time before a user can punch in/out again.

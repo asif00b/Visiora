@@ -171,17 +171,32 @@ def verify_fingerprint_and_mark():
     )
 
     record = result.get('attendance')
+    marked = result.get('marked', False)
+    punch_type = result.get('punch_type', 'IN')
+    reason = result.get('reason', 'unknown')
+
+    if marked:
+        msg = f"Fingerprint Verified! {user.name} ({punch_type} Punch)"
+    elif reason == 'cooldown':
+        msg = result.get('message', f"Fingerprint Verified: {user.name} (Cooldown active: min 10 min wait between punches)")
+    elif reason == 'already_marked_today':
+        msg = f"Fingerprint Verified: {user.name} (Attendance already completed for today)"
+    else:
+        msg = result.get('message', f"Fingerprint Verified: {user.name}")
+
     return jsonify({
         'success': True,
         'matched': True,
+        'attendance_marked': marked,
+        'reason': reason,
         'confidence': 99.0,
         'user': user.to_dict(),
-        'punch_type': result.get('punch_type', 'IN'),
+        'punch_type': punch_type,
         'in_time': record.timestamp.isoformat() if record and record.timestamp else None,
         'out_time': record.punch_out.isoformat() if record and record.punch_out else None,
         'target_hours': user.weekly_target_hours or 40.0,
         'timestamp': record.timestamp.isoformat() if record and record.timestamp else datetime.utcnow().isoformat(),
-        'message': result.get('message', f"Fingerprint Verified! {user.name} ({result.get('punch_type', 'IN')} Punch)")
+        'message': msg
     }), 200
 
 

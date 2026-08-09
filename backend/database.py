@@ -202,7 +202,7 @@ def _seed_defaults():
             "recognition_tolerance": "0.50",
             "arcface_tolerance": "0.40",
             "face_engine_backend": "auto",
-            "attendance_cooldown_seconds": "60",
+            "attendance_cooldown_seconds": "600",
             "scanner_camera_index": "0",
             "save_unknown_faces": "true",
             "scanner_interval_ms": "240",

@@ -648,18 +648,16 @@ export default function Scanner() {
 
           if (!isMounted || !scanningRef.current) break
 
-          if (scanRes.data.matched) {
-            setSensorTouch(true)
-            
-            // Play double success beep
+          if (scanRes.data.success && scanRes.data.attendance_marked) {
+            // Play success audio
             try {
-              const ctx = new (window.AudioContext || window.webkitAudioContext)()
               const playBeep = (freq, delay, dur) => {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)()
                 const osc = ctx.createOscillator()
                 const g = ctx.createGain()
                 osc.type = 'sine'
                 osc.frequency.value = freq
-                g.gain.value = 0.08
+                g.gain.value = 0.15
                 osc.connect(g)
                 g.connect(ctx.destination)
                 osc.start(ctx.currentTime + delay)
@@ -669,7 +667,7 @@ export default function Scanner() {
               playBeep(880, 0.15, 0.1)
             } catch {}
 
-            setBioMessage(`✓ Attendance Verified: ${scanRes.data.user.name} (${scanRes.data.punch_type})`)
+            setBioMessage(`✓ Attendance Verified: ${scanRes.data.user.name} (${scanRes.data.punch_type} Punch)`)
             setMarkedCount(c => c + 1)
             setNotifications(prev => [
               {
@@ -687,7 +685,11 @@ export default function Scanner() {
               ...prev.slice(0, 4)
             ])
 
-            // Let the user see the success message for 2.5 seconds before starting the next scan
+            // Wait 2.5 seconds before re-arming next scan
+            await new Promise(r => setTimeout(r, 2500))
+          } else if (scanRes.data.success && !scanRes.data.attendance_marked) {
+            // Verified fingerprint match, but punch blocked by cooldown / already completed
+            setBioMessage(scanRes.data.message || `✓ Verified: ${scanRes.data.user.name} (Cooldown active: min 10 min wait between punches)`)
             await new Promise(r => setTimeout(r, 2500))
           } else {
             // Play failure tone if it was a real non-match (not a simple timeout)
