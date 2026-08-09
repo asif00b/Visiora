@@ -102,6 +102,7 @@ export default function StudentProfile() {
         dept_id:             editForm.dept_id,
         student_id:          editForm.student_id,
         role:                editForm.role,
+        is_active:           editForm.is_active,
         weekly_target_hours: editForm.weekly_target_hours,
         image_b64:           editForm.image_b64,
       })
@@ -448,6 +449,19 @@ export default function StudentProfile() {
                     <option value="user">User</option>
                     <option value="admin">Admin</option>
                     <option value="hr">HR</option>
+                  </select>
+                </div>
+              )}
+              {canManage && (
+                <div>
+                  <label className="label">Account Status</label>
+                  <select
+                    value={editForm.is_active ? 'active' : 'inactive'}
+                    onChange={e => setEditForm(f => ({ ...f, is_active: e.target.value === 'active' }))}
+                    className="select"
+                  >
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
                   </select>
                 </div>
               )}

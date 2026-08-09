@@ -59,6 +59,8 @@ class User(db.Model):
             'face_quality_score': best_enc.quality_score if best_enc else None,
             'face_encoding_type': best_enc.encoding_type if best_enc else None,
             'face_source_count': best_enc.source_count if best_enc else 0,
+            'has_fingerprint': len(self.fingerprints) > 0,
+            'fingerprint_count': len(self.fingerprints),
         }
         return data
 
