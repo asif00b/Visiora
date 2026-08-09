@@ -9,13 +9,13 @@ import { UserPlus, ChevronRight, ChevronLeft, CheckCircle } from 'lucide-react'
 
 const STEPS = ['Personal Info', 'Face Registration', 'Done']
 
-export default function StudentRegister() {
+export default function UserRegister() {
   const navigate = useNavigate()
   const { toasts, removeToast, toast } = useToast()
   const [step, setStep] = useState(0)
   const [departments, setDepartments] = useState([])
   const [form, setForm] = useState({
-    name: '', email: '', password: '', role: 'student',
+    name: '', email: '', password: '', role: 'user',
     student_id: '', phone: '', dept_id: '', image_b64: ''
   })
   const [capturedImages, setCapturedImages] = useState([])
@@ -122,8 +122,8 @@ export default function StudentRegister() {
               <input name="password" type="password" value={form.password} onChange={handleField} className="input" placeholder="Min 4 chars" required />
             </div>
             <div>
-              <label className="label">Student / Staff ID</label>
-              <input name="student_id" value={form.student_id} onChange={handleField} className="input" placeholder="STU001" />
+              <label className="label">User / Employee ID</label>
+              <input name="student_id" value={form.student_id} onChange={handleField} className="input" placeholder="EMP001" />
             </div>
             <div>
               <label className="label">Phone *</label>
@@ -139,7 +139,7 @@ export default function StudentRegister() {
             <div>
               <label className="label">Role</label>
               <select name="role" value={form.role} onChange={handleField} className="select">
-                <option value="student">Student</option>
+                <option value="user">User / Staff</option>
                 <option value="hr">HR</option>
                 <option value="admin">Admin</option>
               </select>
@@ -194,10 +194,10 @@ export default function StudentRegister() {
             {createdUser?.name} has been registered successfully.
           </p>
           <div className="flex gap-3 justify-center">
-            <button onClick={() => navigate(`/students/${createdUser.id}`)} className="btn-secondary">
+            <button onClick={() => navigate(`/users/${createdUser.id}`)} className="btn-secondary">
               View Profile
             </button>
-            <button onClick={() => { setStep(0); setCreatedUser(null); setCapturedImages([]); setForm({ name:'',email:'',password:'',role:'student',student_id:'',phone:'',dept_id:'',image_b64:'' }) }} className="btn-primary">
+            <button onClick={() => { setStep(0); setCreatedUser(null); setCapturedImages([]); setForm({ name:'',email:'',password:'',role:'user',student_id:'',phone:'',dept_id:'',image_b64:'' }) }} className="btn-primary">
               <UserPlus size={16} /> Register Another
             </button>
           </div>

@@ -34,7 +34,7 @@ const QUALITY_LABEL = (q) => {
   return 'Low'
 }
 
-export default function StudentProfile() {
+export default function UserProfile() {
   const { id }     = useParams()
   const navigate   = useNavigate()
   const { canManage, isAdmin, user: me } = useAuth()

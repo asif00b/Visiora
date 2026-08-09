@@ -57,13 +57,13 @@ export default function Sidebar({ onClose }) {
         <NavSection title="Main">
           <NavItem to="/dashboard" icon={LayoutDashboard} label="Dashboard" onClick={close} />
           {!canManage && user && (
-            <NavItem to={`/students/${user.id}`} icon={Users} label="My Profile" onClick={close} />
+            <NavItem to={`/users/${user.id}`} icon={Users} label="My Profile" onClick={close} />
           )}
         </NavSection>
 
         {canManage && (
           <NavSection title="People">
-            <NavItem to="/students" icon={Users} label="Users" onClick={close} />
+            <NavItem to="/users" icon={Users} label="Users" onClick={close} />
           </NavSection>
         )}
 
@@ -77,7 +77,8 @@ export default function Sidebar({ onClose }) {
 
         {isAdmin && (
           <NavSection title="Admin">
-            <NavItem to="/sessions" icon={Clock} label="Sessions" onClick={close} />
+            {/* Sessions management panel hidden per requirement */}
+            {/* <NavItem to="/sessions" icon={Clock} label="Sessions" onClick={close} /> */}
             <NavItem to="/departments" icon={Building2} label="Departments" onClick={close} />
             <NavItem to="/admin/unknown-faces" icon={HelpCircle} label="Unknown Faces" onClick={close} />
             <NavItem to="/admin/profile-requests" icon={UserCheck} label="Approval Requests" onClick={close} />

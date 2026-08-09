@@ -7,7 +7,7 @@ import ConfirmModal from '../../components/ConfirmModal'
 import { ToastContainer, useToast } from '../../components/Toast'
 import {
   UserPlus, Search, Trash2, Eye, Camera, AlertTriangle, Fingerprint,
-  Edit, UserCheck, UserX, X, Save, Clock, Shield
+  Edit, UserCheck, UserX, X, Save, Clock
 } from 'lucide-react'
 
 const ROLE_COLORS = {
@@ -17,9 +17,9 @@ const ROLE_COLORS = {
   student: 'badge-info',
 }
 
-export default function StudentList() {
+export default function UserList() {
   const navigate = useNavigate()
-  const { isAdmin, canManage } = useAuth()
+  const { isAdmin } = useAuth()
   const { toasts, removeToast, toast } = useToast()
   const [users, setUsers]               = useState([])
   const [departments, setDepartments]   = useState([])
@@ -331,7 +331,7 @@ export default function StudentList() {
             {missingBioOnly && <span className="ml-1 text-amber-400">· Missing biometrics filter active</span>}
           </p>
         </div>
-        <button id="add-user-btn" onClick={() => navigate('/students/register')} className="btn-primary">
+        <button id="add-user-btn" onClick={() => navigate('/users/register')} className="btn-primary">
           <UserPlus size={16} /> Add User
         </button>
       </div>
@@ -487,7 +487,7 @@ export default function StudentList() {
                     <div className="flex gap-1.5 items-center">
                       <button
                         id={`view-user-${user.id}`}
-                        onClick={() => navigate(`/students/${user.id}`)}
+                        onClick={() => navigate(`/users/${user.id}`)}
                         className="btn-icon"
                         title="View Full Profile"
                       >
