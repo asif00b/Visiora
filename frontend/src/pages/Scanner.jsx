@@ -113,15 +113,17 @@ export default function Scanner() {
 
       const items = recs.map(r => ({
         id: r.id,
+        user_id: r.user_id,
         name: r.user_name || r.user?.name || 'User',
-        photo: r.user_image || r.user?.image_path || null,
+        photo: r.photo_url || r.user_image || r.user?.image_path || r.user?.photo_url || null,
         punch_type: r.punch_out ? 'OUT' : 'IN',
         method: (r.note || '').toLowerCase().includes('biometric') ? 'Fingerprint' : 'Face',
         time: new Date(r.punch_out || r.timestamp),
         student_id: r.user_student_id || r.user?.student_id || '—',
         in_time: r.timestamp,
         out_time: r.punch_out,
-        target_hours: r.user?.weekly_target_hours || 40.0
+        target_hours: r.weekly_target_hours || r.user?.weekly_target_hours || 40.0,
+        hours_worked: r.hours_worked || 0.0
       }))
 
       setNotifications(items.slice(0, 5))
@@ -771,7 +773,7 @@ export default function Scanner() {
                     photoUrl = rawPhoto;
                   } else {
                     const cleanPath = String(rawPhoto).replace(/^\/?(storage\/)?/, '');
-                    photoUrl = `/storage/${cleanPath}`;
+                    photoUrl = `http://localhost:5000/storage/${cleanPath}`;
                   }
                 }
 
@@ -788,7 +790,8 @@ export default function Scanner() {
                         <img 
                           src={photoUrl} 
                           alt={n.name} 
-                          className="w-14 h-14 rounded-xl object-cover border-2 border-cyan-500/40 shadow-md shadow-cyan-500/10" 
+                          className="w-14 h-14 rounded-xl object-cover border-2 border-cyan-500/40 shadow-md shadow-cyan-500/10"
+                          onError={(e) => { e.currentTarget.src = ''; e.currentTarget.alt = n.name?.[0] || '?'; }}
                         />
                       ) : (
                         <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-cyan-950 via-slate-800 to-slate-900 border-2 border-cyan-500/30 flex items-center justify-center text-cyan-400 font-extrabold text-2xl shadow-lg shadow-cyan-500/10">
@@ -816,8 +819,10 @@ export default function Scanner() {
                           <span className="text-emerald-400 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />{inTimeStr}</span>
                         </div>
                         <div className="flex flex-col items-center">
-                          <span className="text-slate-500 text-[9px] uppercase tracking-wider">Target</span>
-                          <span className="text-cyan-400 font-bold">{n.target_hours || 40}h</span>
+                          <span className="text-slate-500 text-[9px] uppercase tracking-wider">Rem. Target</span>
+                          <span className="text-cyan-400 font-bold" title={`Weekly Target: ${n.target_hours || 40}h | Logged: ${(n.hours_worked || 0).toFixed(1)}h`}>
+                            {Math.max(0, (n.target_hours || 40) - (n.hours_worked || 0)).toFixed(1)}h
+                          </span>
                         </div>
                         <div className="flex flex-col items-end">
                           <span className="text-slate-500 text-[9px] uppercase tracking-wider">Left (Out Time)</span>
