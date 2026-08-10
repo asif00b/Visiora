@@ -122,14 +122,32 @@ def create_app():
     def serve_storage(filepath):
         return send_from_directory(os.path.abspath(_STORAGE_ROOT), filepath)
 
-    # ── Root Welcome ─────────────────────────────────────────────────────────
+    # ── Serve built frontend (SPA) ─────────────────────────────────────────
+    _FRONTEND_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'frontend', 'dist')
+
     @app.route('/')
-    def root():
+    def serve_frontend_root():
+        dist = os.path.abspath(_FRONTEND_DIST)
+        if os.path.isfile(os.path.join(dist, 'index.html')):
+            return send_from_directory(dist, 'index.html')
         return jsonify({
             'name': 'Visiora — Face Recognition Attendance System Backend',
             'status': 'active',
-            'version': '6.1.0'
+            'version': '6.1.0',
+            'hint': 'Run "npm run build" in frontend/ to enable web UI'
         }), 200
+
+    @app.route('/<path:path>')
+    def serve_frontend_files(path):
+        dist = os.path.abspath(_FRONTEND_DIST)
+        # Serve actual files (JS, CSS, images, etc.)
+        full_path = os.path.join(dist, path)
+        if os.path.isfile(full_path):
+            return send_from_directory(dist, path)
+        # SPA fallback — return index.html for client-side routes
+        if os.path.isfile(os.path.join(dist, 'index.html')):
+            return send_from_directory(dist, 'index.html')
+        return jsonify({'error': 'Not found'}), 404
 
     # ── Health check ─────────────────────────────────────────────────────────
     @app.route('/api/health')

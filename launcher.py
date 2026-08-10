@@ -52,8 +52,21 @@ def main():
     print(f"{CYAN}{BOLD}   Starting Visiora — Face Recognition Attendance System   {RESET}")
     print(f"{CYAN}{BOLD}============================================================{RESET}\n")
 
-    # 1. Start Backend (Silent Background)
-    print(f"{YELLOW}[1/3] Launching Python Backend...{RESET}")
+    # 1. Build Frontend (production)
+    frontend_dir = os.path.join(ROOT_DIR, 'frontend')
+    dist_dir = os.path.join(frontend_dir, 'dist')
+    npm_run = 'npm.cmd' if os.name == 'nt' else 'npm'
+
+    if not os.path.isfile(os.path.join(dist_dir, 'index.html')):
+        print(f"{YELLOW}[1/4] Building Frontend (first time)...{RESET}")
+        subprocess.run([npm_run, 'run', 'build'], cwd=frontend_dir,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"{GREEN}[OK] Frontend built!{RESET}")
+    else:
+        print(f"{GREEN}[1/4] Frontend build found (dist/ exists){RESET}")
+
+    # 2. Start Backend (Silent Background)
+    print(f"{YELLOW}[2/4] Launching Python Backend...{RESET}")
     backend_dir = os.path.join(ROOT_DIR, 'backend')
     backend_proc = subprocess.Popen(
         [PYTHON_EXE, 'app.py'],
@@ -64,18 +77,15 @@ def main():
     )
     processes.append(backend_proc)
 
-    # 2. Wait for Backend
-    print(f"{YELLOW}[2/3] Waiting for Backend initialization & database connection...{RESET}")
+    # 3. Wait for Backend
+    print(f"{YELLOW}[3/4] Waiting for Backend initialization & database connection...{RESET}")
     if not wait_for_backend():
         print(f"\n{YELLOW}[!] Backend taking longer than usual, proceeding...{RESET}")
     else:
         print(f"{GREEN}[OK] Backend is ONLINE!{RESET}\n")
 
-    # 3. Start Frontend (Vite - Clean HTTP)
-    print(f"{YELLOW}[3/3] Launching Frontend & Public Tunnel...{RESET}")
-    frontend_dir = os.path.join(ROOT_DIR, 'frontend')
-    npm_run = 'npm.cmd' if os.name == 'nt' else 'npm'
-    
+    # 4. Start Vite Dev Server (for local development)
+    print(f"{YELLOW}[4/4] Launching Frontend Dev Server & Public Tunnel...{RESET}")
     frontend_proc = subprocess.Popen(
         [npm_run, 'run', 'dev'],
         cwd=frontend_dir,
@@ -85,10 +95,10 @@ def main():
     )
     processes.append(frontend_proc)
 
-    # 4. Start Cloudflare Tunnel silently in background (HTTP/2 fast protocol)
+    # 5. Start Cloudflare Tunnel → Flask (port 5000 serves API + built frontend)
     public_url = None
     try:
-        tunnel_cmd = ['cloudflared', 'tunnel', '--protocol', 'http2', '--url', 'http://localhost:5173']
+        tunnel_cmd = ['cloudflared', 'tunnel', '--protocol', 'http2', '--url', 'http://localhost:5000']
         tunnel_proc = subprocess.Popen(
             tunnel_cmd,
             stdout=subprocess.PIPE,
@@ -116,13 +126,14 @@ def main():
     print(f"{GREEN}{BOLD}============================================================{RESET}")
     print(f"{GREEN}{BOLD}  VISIORA — SYSTEM ONLINE & ALL SERVICES READY!            {RESET}")
     print(f"{GREEN}{BOLD}============================================================{RESET}")
-    print(f" {GREEN}[OK]{RESET} {BOLD}Local Access Link  :{RESET} {CYAN}http://localhost:5173{RESET}")
+    print(f" {GREEN}[OK]{RESET} {BOLD}Local (Dev)    :{RESET} {CYAN}http://localhost:5173{RESET}")
+    print(f" {GREEN}[OK]{RESET} {BOLD}Local (Prod)   :{RESET} {CYAN}http://localhost:5000{RESET}")
     if public_url:
-        print(f" {GREEN}[OK]{RESET} {BOLD}Public Access Link :{RESET} {CYAN}{public_url}{RESET}")
+        print(f" {GREEN}[OK]{RESET} {BOLD}Public Access  :{RESET} {CYAN}{public_url}{RESET}")
     else:
-        print(f" {GREEN}[OK]{RESET} {BOLD}Public Access Link :{RESET} {CYAN}https://visiora.trycloudflare.com{RESET}")
+        print(f" {YELLOW}[!]{RESET} {BOLD}Public Access  :{RESET} {CYAN}Tunnel not available{RESET}")
     print(f"{GREEN}{BOLD}============================================================{RESET}")
-    print(f" {GREEN}{BOLD}Link 2 ta ready!{RESET} Press {YELLOW}Ctrl+C{RESET} anytime to stop all services.\n")
+    print(f" Press {YELLOW}Ctrl+C{RESET} anytime to stop all services.\n")
 
     # Keep main window alive
     try:
