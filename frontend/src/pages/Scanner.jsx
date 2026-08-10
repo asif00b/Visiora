@@ -773,7 +773,7 @@ export default function Scanner() {
                     photoUrl = rawPhoto;
                   } else {
                     const cleanPath = String(rawPhoto).replace(/^\/?(storage\/)?/, '');
-                    photoUrl = `http://localhost:5000/storage/${cleanPath}`;
+                    photoUrl = `/storage/${cleanPath}`;
                   }
                 }
 
