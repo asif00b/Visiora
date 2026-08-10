@@ -519,11 +519,11 @@ export default function Scanner() {
             ])
 
             await new Promise(r => setTimeout(r, 4000))
-            if (isMounted && scanningRef.current) setBioMessage('Waiting for finger touch...')
+            if (isMounted && scanningRef.current) setBioMessage('')
           } else if (scanRes.data.success && !scanRes.data.attendance_marked) {
             setBioMessage(scanRes.data.message || `✓ Verified: ${scanRes.data.user.name} (Cooldown active: min 10 min wait between punches)`)
             await new Promise(r => setTimeout(r, 4000))
-            if (isMounted && scanningRef.current) setBioMessage('Waiting for finger touch...')
+            if (isMounted && scanningRef.current) setBioMessage('')
           } else {
             if (scanRes.data.message && !scanRes.data.message.includes('timed out') && !scanRes.data.message.includes('No matching fingerprint')) {
               try {
@@ -538,14 +538,17 @@ export default function Scanner() {
                 osc.start()
                 osc.stop(ctx.currentTime + 0.25)
               } catch {}
+              setBioMessage(scanRes.data.message)
+              await new Promise(r => setTimeout(r, 3000))
+              if (isMounted && scanningRef.current) setBioMessage('')
+            } else {
+              setBioMessage('')
+              await new Promise(r => setTimeout(r, 1000))
             }
-            setBioMessage(scanRes.data.message || 'No match found. Try again.')
-            await new Promise(r => setTimeout(r, 1000))
           }
         } catch (err) {
           if (!isMounted || !scanningRef.current) break
-          const errMsg = err.response?.data?.message || err.message || 'Futronic sensor offline.'
-          setBioMessage(errMsg)
+          setBioMessage('')
           await new Promise(r => setTimeout(r, 1500))
         }
       }
@@ -762,9 +765,21 @@ export default function Scanner() {
             ) : (
               notifications.slice(0, 5).map((n, idx) => {
                 const rawPhoto = n.photo || n.user_image || n.user?.image_path;
-                const photoUrl = rawPhoto ? (rawPhoto.startsWith('http') || rawPhoto.startsWith('data:') ? rawPhoto : (rawPhoto.startsWith('/') ? rawPhoto : `/storage/${rawPhoto}`)) : null;
-                const inTimeStr = n.in_time ? new Date(n.in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (n.time ? new Date(n.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--');
-                const outTimeStr = n.out_time ? new Date(n.out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (n.punch_type === 'OUT' && n.time ? new Date(n.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--');
+                let photoUrl = null;
+                if (rawPhoto) {
+                  if (rawPhoto.startsWith('http') || rawPhoto.startsWith('data:')) {
+                    photoUrl = rawPhoto;
+                  } else {
+                    const cleanPath = String(rawPhoto).replace(/^\/?(storage\/)?/, '');
+                    photoUrl = `/storage/${cleanPath}`;
+                  }
+                }
+
+                const inTimeObj = n.in_time ? new Date(n.in_time) : (n.time ? new Date(n.time) : null);
+                const inTimeStr = inTimeObj && !isNaN(inTimeObj) ? inTimeObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
+
+                const outTimeObj = n.out_time ? new Date(n.out_time) : (n.punch_type === 'OUT' && n.time ? new Date(n.time) : null);
+                const outTimeStr = outTimeObj && !isNaN(outTimeObj) ? outTimeObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (n.punch_type === 'IN' ? 'In Office' : '--:--');
 
                 return (
                   <div key={n.id || idx} className="flex-shrink-0 flex items-center gap-4 p-3.5 bg-gradient-to-r from-slate-900/90 via-slate-800/80 to-slate-900/90 rounded-xl border border-slate-700/60 shadow-lg backdrop-blur-md hover:border-cyan-500/40 transition-all animate-slide-up" style={{ animationDelay: `${idx * 40}ms` }}>
