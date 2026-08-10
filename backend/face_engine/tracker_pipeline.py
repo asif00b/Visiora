@@ -442,6 +442,7 @@ class TrackingPipeline:
 
             res = {
                 "box": {"left": x1 / w, "top": y1 / h, "right": x2 / w, "bottom": y2 / h},
+                "location": [int(y1), int(x2), int(y2), int(x1)],
                 "matched": matched,
                 "recognition_confirmed": rec_confirmed,
                 "user_id": user_id,

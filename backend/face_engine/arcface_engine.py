@@ -187,7 +187,7 @@ class ArcFaceEngine:
         self._ready = False
         self._provider = "unavailable"
         self._model_name = os.environ.get("INSIGHTFACE_MODEL", "buffalo_s")
-        self._det_size = int(os.environ.get("INSIGHTFACE_DET_SIZE", "320"))
+        self._det_size = int(os.environ.get("INSIGHTFACE_DET_SIZE", "640"))
 
         if not ARCFACE_AVAILABLE:
             logger.warning("[ArcFace] Not available: %s", _INIT_ERROR)
@@ -206,7 +206,7 @@ class ArcFaceEngine:
         )
         ctx_id = 0 if use_cuda else -1
 
-        det_thresh = float(os.environ.get("INSIGHTFACE_DET_THRESH", "0.65"))
+        det_thresh = float(os.environ.get("INSIGHTFACE_DET_THRESH", "0.45"))
         try:
             self._app = FaceAnalysis(
                 name=self._model_name,

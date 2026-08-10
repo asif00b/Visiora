@@ -3,7 +3,7 @@ import { useCamera } from '../hooks/useCamera'
 import { recognizeFace } from '../api/face'
 import { getAttendance } from '../api/attendance'
 import { verifyBiometricScan } from '../api/biometric'
-import { Camera, CameraOff, Zap, UserCheck, Activity, Maximize2, Minimize2, Fingerprint } from 'lucide-react'
+import { Camera, CameraOff, Zap, UserCheck, Activity, Maximize2, Minimize2, Fingerprint, RefreshCw } from 'lucide-react'
 
 const estimateEmotion = (kpss) => {
   if (!kpss || kpss.length < 5) return 'Neutral'
@@ -124,7 +124,7 @@ export default function Scanner() {
         target_hours: r.user?.weekly_target_hours || 40.0
       }))
 
-      setNotifications(items.slice(0, 10))
+      setNotifications(items.slice(0, 5))
       setMarkedCount(recs.length)
     } catch {
       // Keep existing
@@ -157,8 +157,13 @@ export default function Scanner() {
 
     if (faces.length > 0 && faces.some(f => f.matched)) {
       const primaryFace = faces.find(f => f.matched)
-      if (primaryFace && primaryFace.location) {
-        const [top, right, bottom, left] = primaryFace.location
+      if (primaryFace && (primaryFace.location || primaryFace.box)) {
+        const [top, right, bottom, left] = primaryFace.location || [
+          primaryFace.box.top * (video.videoHeight || 480),
+          primaryFace.box.right * (video.videoWidth || 640),
+          primaryFace.box.bottom * (video.videoHeight || 480),
+          primaryFace.box.left * (video.videoWidth || 640)
+        ]
         const fw = (right - left) * scaleX
         const fh = (bottom - top) * scaleY
         const videoW = canvas.width
@@ -186,7 +191,15 @@ export default function Scanner() {
     }
 
     faces.forEach((face) => {
-      const [top, right, bottom, left] = face.location
+      const loc = face.location || (face.box ? [
+        face.box.top * (video.videoHeight || 480),
+        face.box.right * (video.videoWidth || 640),
+        face.box.bottom * (video.videoHeight || 480),
+        face.box.left * (video.videoWidth || 640)
+      ] : null)
+
+      if (!loc) return
+      const [top, right, bottom, left] = loc
       let x = left * scaleX
       const y = top * scaleY
       const w = (right - left) * scaleX
@@ -728,59 +741,59 @@ export default function Scanner() {
               <RefreshCw size={12} /> Sync
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto flex flex-col gap-4 pr-2" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+          <div className="flex-1 flex flex-col gap-3 pr-1 overflow-hidden">
             {notifications.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2 opacity-50">
+              <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2 opacity-50 py-12">
                 <UserCheck size={32} />
                 <p className="text-xs font-medium uppercase tracking-wider">No scans today yet</p>
               </div>
             ) : (
-              notifications.map((n, idx) => {
+              notifications.slice(0, 5).map((n, idx) => {
                 const photoUrl = n.photo ? (n.photo.startsWith('http') || n.photo.startsWith('data:') ? n.photo : `/storage/${n.photo}`) : null;
                 const inTimeStr = n.in_time ? new Date(n.in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
                 const outTimeStr = n.out_time ? new Date(n.out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
 
                 return (
-                  <div key={n.id || idx} className="flex-shrink-0 flex items-center gap-5 p-5 bg-gradient-to-r from-slate-900/90 via-slate-800/80 to-slate-900/90 rounded-2xl border border-slate-700/60 shadow-xl backdrop-blur-md hover:border-cyan-500/40 transition-all animate-slide-up min-h-[110px]" style={{ animationDelay: `${idx * 50}ms` }}>
+                  <div key={n.id || idx} className="flex-shrink-0 flex items-center gap-4 p-3.5 bg-gradient-to-r from-slate-900/90 via-slate-800/80 to-slate-900/90 rounded-xl border border-slate-700/60 shadow-lg backdrop-blur-md hover:border-cyan-500/40 transition-all animate-slide-up" style={{ animationDelay: `${idx * 40}ms` }}>
                     <div className="relative flex-shrink-0">
                       {photoUrl ? (
                         <img 
                           src={photoUrl} 
                           alt={n.name} 
-                          className="w-20 h-20 rounded-2xl object-cover border-2 border-cyan-500/40 shadow-md shadow-cyan-500/10" 
+                          className="w-14 h-14 rounded-xl object-cover border-2 border-cyan-500/40 shadow-md shadow-cyan-500/10" 
                         />
                       ) : (
-                        <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-cyan-950 via-slate-800 to-slate-900 border-2 border-cyan-500/30 flex items-center justify-center text-cyan-400 font-extrabold text-3xl shadow-lg shadow-cyan-500/10">
+                        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-cyan-950 via-slate-800 to-slate-900 border-2 border-cyan-500/30 flex items-center justify-center text-cyan-400 font-extrabold text-2xl shadow-lg shadow-cyan-500/10">
                           {n.name ? n.name.substring(0, 1).toUpperCase() : '?'}
                         </div>
                       )}
                     </div>
-                    <div className="flex-1 min-w-0 space-y-1">
+                    <div className="flex-1 min-w-0 space-y-0.5">
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex flex-col min-w-0">
-                          <h4 className="text-xl font-bold text-slate-100 truncate tracking-wide">{n.name}</h4>
-                          <span className="text-sm font-medium text-slate-400">ID: {n.student_id || 'N/A'}</span>
+                          <h4 className="text-base font-bold text-slate-100 truncate tracking-wide">{n.name}</h4>
+                          <span className="text-xs font-medium text-slate-400">ID: {n.student_id || 'N/A'}</span>
                         </div>
-                        <div className="flex flex-col items-end gap-1">
-                          <span className={`px-3 py-1 rounded-full text-xs font-extrabold tracking-wider border ${n.punch_type === 'IN' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30'}`}>
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold tracking-wider border ${n.punch_type === 'IN' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30'}`}>
                             {n.punch_type}
                           </span>
-                          <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">{n.method}</span>
+                          <span className="text-[9px] text-slate-500 uppercase font-bold tracking-wider">{n.method}</span>
                         </div>
                       </div>
                       
-                      <div className="flex items-center justify-between pt-1 mt-1 border-t border-slate-800/50 text-xs font-medium">
+                      <div className="flex items-center justify-between pt-1 mt-1 border-t border-slate-800/50 text-[11px] font-medium">
                         <div className="flex flex-col">
-                          <span className="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">IN Time</span>
-                          <span className="text-emerald-400 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />{inTimeStr}</span>
+                          <span className="text-slate-500 text-[9px] uppercase tracking-wider">IN Time</span>
+                          <span className="text-emerald-400 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />{inTimeStr}</span>
                         </div>
                         <div className="flex flex-col items-center">
-                          <span className="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">Target</span>
+                          <span className="text-slate-500 text-[9px] uppercase tracking-wider">Target</span>
                           <span className="text-cyan-400 font-bold">{n.target_hours || 40}h</span>
                         </div>
                         <div className="flex flex-col items-end">
-                          <span className="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">Left (Out Time)</span>
-                          <span className="text-amber-400 flex items-center gap-1.5">{outTimeStr}<span className="w-1.5 h-1.5 rounded-full bg-amber-400" /></span>
+                          <span className="text-slate-500 text-[9px] uppercase tracking-wider">Left (Out Time)</span>
+                          <span className="text-amber-400 flex items-center gap-1">{outTimeStr}<span className="w-1.5 h-1.5 rounded-full bg-amber-400" /></span>
                         </div>
                       </div>
                     </div>
