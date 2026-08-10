@@ -169,7 +169,7 @@ export default function Scanner() {
         const videoW = canvas.width
         const videoH = canvas.height
 
-        const targetScale = Math.min(1.7, Math.max(1.0, 0.45 / (fw / videoW)))
+        const targetScale = Math.min(1.2, Math.max(1.0, 0.35 / (fw / videoW)))
         const faceCenterX = ((left + right) / 2) * scaleX
         const faceCenterY = ((top + bottom) / 2) * scaleY
 
@@ -199,7 +199,19 @@ export default function Scanner() {
       ] : null)
 
       if (!loc) return
-      const [top, right, bottom, left] = loc
+      let [top, right, bottom, left] = loc
+
+      // Expand reticle frame box (18% padding) so it surrounds face, forehead, hair & chin naturally
+      const rawW = right - left
+      const rawH = bottom - top
+      const padW = rawW * 0.18
+      const padH = rawH * 0.18
+
+      left = Math.max(0, left - padW)
+      right = Math.min(video.videoWidth || 640, right + padW)
+      top = Math.max(0, top - padH * 1.2)
+      bottom = Math.min(video.videoHeight || 480, bottom + padH * 0.8)
+
       let x = left * scaleX
       const y = top * scaleY
       const w = (right - left) * scaleX
@@ -749,9 +761,10 @@ export default function Scanner() {
               </div>
             ) : (
               notifications.slice(0, 5).map((n, idx) => {
-                const photoUrl = n.photo ? (n.photo.startsWith('http') || n.photo.startsWith('data:') ? n.photo : `/storage/${n.photo}`) : null;
-                const inTimeStr = n.in_time ? new Date(n.in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
-                const outTimeStr = n.out_time ? new Date(n.out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
+                const rawPhoto = n.photo || n.user_image || n.user?.image_path;
+                const photoUrl = rawPhoto ? (rawPhoto.startsWith('http') || rawPhoto.startsWith('data:') ? rawPhoto : (rawPhoto.startsWith('/') ? rawPhoto : `/storage/${rawPhoto}`)) : null;
+                const inTimeStr = n.in_time ? new Date(n.in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (n.time ? new Date(n.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--');
+                const outTimeStr = n.out_time ? new Date(n.out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (n.punch_type === 'OUT' && n.time ? new Date(n.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--');
 
                 return (
                   <div key={n.id || idx} className="flex-shrink-0 flex items-center gap-4 p-3.5 bg-gradient-to-r from-slate-900/90 via-slate-800/80 to-slate-900/90 rounded-xl border border-slate-700/60 shadow-lg backdrop-blur-md hover:border-cyan-500/40 transition-all animate-slide-up" style={{ animationDelay: `${idx * 40}ms` }}>
