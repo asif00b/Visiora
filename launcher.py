@@ -98,26 +98,52 @@ def main():
     # 5. Start Cloudflare Tunnel → Flask (port 5000 serves API + built frontend)
     public_url = None
     try:
-        tunnel_cmd = ['cloudflared', 'tunnel', '--protocol', 'http2', '--url', 'http://localhost:5000']
+        tunnel_cmd = ['cloudflared', 'tunnel', '--protocol', 'http2',
+                      '--metrics', 'localhost:20241',
+                      '--url', 'http://localhost:5000']
         tunnel_proc = subprocess.Popen(
             tunnel_cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.STDOUT,  # merge stderr into stdout
             text=True,
             bufsize=1,
             creationflags=0x08000000 if os.name == 'nt' else 0 # CREATE_NO_WINDOW
         )
         processes.append(tunnel_proc)
 
-        start_tunnel_wait = time.time()
-        while time.time() - start_tunnel_wait < 10:
-            line = tunnel_proc.stdout.readline()
-            if not line:
+        import threading
+        url_found = threading.Event()
+
+        def scan_output():
+            for line in iter(tunnel_proc.stdout.readline, ''):
+                m = re.search(r'https://[a-zA-Z0-9\-]+\.trycloudflare\.com', line)
+                if m:
+                    nonlocal public_url
+                    public_url = m.group(0)
+                    url_found.set()
+                    return
+
+        t = threading.Thread(target=scan_output, daemon=True)
+        t.start()
+
+        # Also poll the metrics API as a faster fallback
+        metrics_found = False
+        for _ in range(30):
+            if url_found.is_set():
                 break
-            match = re.search(r'https://[a-zA-Z0-9\-]+\.trycloudflare\.com', line)
-            if match:
-                public_url = match.group(0)
-                break
+            time.sleep(1)
+            if not metrics_found:
+                try:
+                    resp = urllib.request.urlopen('http://localhost:20241/metrics', timeout=1)
+                    metrics_text = resp.read().decode('utf-8', errors='ignore')
+                    m = re.search(r'https://[a-zA-Z0-9\-]+\.trycloudflare\.com', metrics_text)
+                    if m:
+                        public_url = m.group(0)
+                        url_found.set()
+                        metrics_found = True
+                except Exception:
+                    pass
+
     except Exception as tunnel_err:
         print(f"[!] Public Cloudflare tunnel skipped: {tunnel_err}")
 
