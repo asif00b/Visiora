@@ -59,13 +59,23 @@ def _calculate_user_leave_summary(user_id: int):
 
 
 @leaves_bp.route('/leaves/summary', methods=['GET'])
+@leaves_bp.route('/leaves/summary/<int:uid>', methods=['GET'])
 @jwt_required()
 @require_auth
-def get_my_summary():
-    """Get leave summary for current user."""
+def get_leave_summary(uid=None):
+    """Get leave summary for current user or specified user (Admin/HR)."""
     try:
         current = get_current_user()
-        summary = _calculate_user_leave_summary(current.id)
+        target_uid = current.id
+        if uid and (current.role in ['admin', 'hr'] or current.id == uid):
+            target_uid = uid
+
+        summary = _calculate_user_leave_summary(target_uid)
+        target_user = User.query.get(target_uid)
+        summary['user_id'] = target_uid
+        summary['user_name'] = target_user.name if target_user else current.name
+        summary['department_name'] = target_user.department.name if (target_user and target_user.department) else 'General'
+
         return jsonify({'success': True, 'summary': summary}), 200
     except Exception as e:
         logger.error(f'[Leaves] Summary error: {e}')

@@ -30,7 +30,8 @@ import {
   Search,
   CalendarCheck,
   FileEdit,
-  Save
+  Save,
+  Eye
 } from 'lucide-react'
 
 const LEAVE_TYPES = ['Casual', 'Medical', 'Festival']
@@ -100,6 +101,11 @@ export default function LeaveManagement() {
   const [reviewFilterStatus, setReviewFilterStatus] = useState('all')
   const [reviewSearchTerm, setReviewSearchTerm] = useState('')
 
+  // Review & Selected Applicant Summary states
+  const [selectedReviewLeaveItem, setSelectedReviewLeaveItem] = useState(null)
+  const [inspectedUserSummary, setInspectedUserSummary] = useState(null)
+  const [inspectedLoading, setInspectedLoading] = useState(false)
+
   // Review Modal state
   const [selectedReviewLeave, setSelectedReviewLeave] = useState(null)
   const [reviewAction, setReviewAction] = useState('') // 'approved' | 'rejected'
@@ -134,6 +140,50 @@ export default function LeaveManagement() {
   useEffect(() => {
     fetchData()
   }, [fetchData])
+
+  // Filtered lists
+  const filteredMyLeaves = myLeaves.filter(l => {
+    if (myFilterStatus === 'all') return true
+    return l.status === myFilterStatus
+  })
+
+  const filteredReviewLeaves = allLeaves.filter(l => {
+    if (reviewFilterStatus !== 'all' && l.status !== reviewFilterStatus) return false
+    if (reviewSearchTerm.trim()) {
+      const term = reviewSearchTerm.toLowerCase()
+      const name = (l.user_name || '').toLowerCase()
+      const dept = (l.department_name || '').toLowerCase()
+      const sid = (l.user_student_id || '').toLowerCase()
+      return name.includes(term) || dept.includes(term) || sid.includes(term)
+    }
+    return true
+  })
+
+  // Auto-select first application in review list when entering review tab or changing filter
+  useEffect(() => {
+    if (activeTab === 'review' && filteredReviewLeaves.length > 0) {
+      if (!selectedReviewLeaveItem || !filteredReviewLeaves.some(l => l.id === selectedReviewLeaveItem.id)) {
+        setSelectedReviewLeaveItem(filteredReviewLeaves[0])
+      }
+    }
+  }, [activeTab, filteredReviewLeaves, selectedReviewLeaveItem])
+
+  // Fetch inspected user summary whenever selected applicant changes in review tab
+  useEffect(() => {
+    if (activeTab === 'review' && selectedReviewLeaveItem?.user_id) {
+      setInspectedLoading(true)
+      getLeaveSummary(selectedReviewLeaveItem.user_id)
+        .then(res => {
+          if (res.data?.summary) {
+            setInspectedUserSummary(res.data.summary)
+          }
+        })
+        .catch(err => console.error('Error fetching inspected user summary:', err))
+        .finally(() => setInspectedLoading(false))
+    } else {
+      setInspectedUserSummary(null)
+    }
+  }, [activeTab, selectedReviewLeaveItem?.user_id])
 
   // Reset form
   const resetForm = () => {
@@ -259,7 +309,8 @@ export default function LeaveManagement() {
   }
 
   // Open Review modal
-  const handleOpenReview = (leaveItem, action) => {
+  const handleOpenReview = (e, leaveItem, action) => {
+    e.stopPropagation() // Prevent row click from overriding
     setSelectedReviewLeave(leaveItem)
     setReviewAction(action)
     setAdminComment('')
@@ -285,28 +336,12 @@ export default function LeaveManagement() {
     }
   }
 
-  // Filtered lists
-  const filteredMyLeaves = myLeaves.filter(l => {
-    if (myFilterStatus === 'all') return true
-    return l.status === myFilterStatus
-  })
-
-  const filteredReviewLeaves = allLeaves.filter(l => {
-    if (reviewFilterStatus !== 'all' && l.status !== reviewFilterStatus) return false
-    if (reviewSearchTerm.trim()) {
-      const term = reviewSearchTerm.toLowerCase()
-      const name = (l.user_name || '').toLowerCase()
-      const dept = (l.department_name || '').toLowerCase()
-      const sid = (l.user_student_id || '').toLowerCase()
-      return name.includes(term) || dept.includes(term) || sid.includes(term)
-    }
-    return true
-  })
-
   const pendingReviewCount = allLeaves.filter(l => l.status === 'pending').length
   const draftCount = myLeaves.filter(l => l.status === 'draft').length
 
-  const usedPercentage = Math.min(100, Math.round((summary.leave_taken / summary.yearly_entitlement) * 100))
+  // Active Summary calculation for right panel
+  const activeSummary = (activeTab === 'review' && inspectedUserSummary) ? inspectedUserSummary : summary
+  const usedPercentage = Math.min(100, Math.round((activeSummary.leave_taken / activeSummary.yearly_entitlement) * 100))
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -742,7 +777,7 @@ export default function LeaveManagement() {
                     Review Leave Requests
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Approve or reject leave applications submitted across departments.
+                    Click any application card below to view that applicant's Leave Summary panel on the right.
                   </p>
                 </div>
 
@@ -789,11 +824,17 @@ export default function LeaveManagement() {
                     const stBadge = STATUS_BADGES[l.status] || STATUS_BADGES.pending
                     const StatusIcon = stBadge.icon
                     const typeColor = TYPE_COLORS[l.leave_type] || TYPE_COLORS.Casual
+                    const isSelected = selectedReviewLeaveItem?.id === l.id
 
                     return (
                       <div
                         key={l.id}
-                        className="p-4 rounded-xl bg-slate-800/40 border border-slate-700/40 hover:border-slate-700 transition-all space-y-3"
+                        onClick={() => setSelectedReviewLeaveItem(l)}
+                        className={`p-4 rounded-xl cursor-pointer transition-all space-y-3 ${
+                          isSelected
+                            ? 'bg-gradient-to-r from-cyan-950/40 via-slate-800 to-slate-800 border-2 border-cyan-500/80 shadow-lg shadow-cyan-950/40 ring-1 ring-cyan-500/30'
+                            : 'bg-slate-800/40 border border-slate-700/40 hover:border-slate-600 hover:bg-slate-800/60'
+                        }`}
                       >
                         {/* User & Status Header */}
                         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/60 pb-3">
@@ -802,7 +843,14 @@ export default function LeaveManagement() {
                               {l.user_name ? l.user_name.charAt(0).toUpperCase() : 'U'}
                             </div>
                             <div>
-                              <p className="text-xs font-bold text-slate-100">{l.user_name}</p>
+                              <div className="flex items-center gap-2">
+                                <p className="text-xs font-bold text-slate-100">{l.user_name}</p>
+                                {isSelected && (
+                                  <span className="inline-flex items-center gap-1 text-[9px] font-bold text-cyan-300 bg-cyan-500/20 px-2 py-0.2 rounded-full border border-cyan-500/40">
+                                    <Eye size={10} /> Summary Viewing
+                                  </span>
+                                )}
+                              </div>
                               <p className="text-[11px] text-slate-500">{l.department_name} · ID: {l.user_student_id}</p>
                             </div>
                           </div>
@@ -844,14 +892,14 @@ export default function LeaveManagement() {
                         {l.status === 'pending' ? (
                           <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-800/80">
                             <button
-                              onClick={() => handleOpenReview(l, 'rejected')}
+                              onClick={(e) => handleOpenReview(e, l, 'rejected')}
                               className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/30 hover:bg-rose-500/20 transition-colors flex items-center gap-1.5"
                             >
                               <X size={14} /> Reject
                             </button>
 
                             <button
-                              onClick={() => handleOpenReview(l, 'approved')}
+                              onClick={(e) => handleOpenReview(e, l, 'approved')}
                               className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 transition-colors flex items-center gap-1.5"
                             >
                               <Check size={14} /> Approve
@@ -879,108 +927,126 @@ export default function LeaveManagement() {
               <div>
                 <h3 className="font-bold text-base text-slate-100 flex items-center gap-2">
                   <Sparkles size={18} className="text-cyan-400" />
-                  Leave Summary
+                  {activeTab === 'review' && selectedReviewLeaveItem
+                    ? `${selectedReviewLeaveItem.user_name}'s Summary`
+                    : 'Leave Summary'}
                 </h3>
-                <p className="text-xs text-slate-500 mt-0.5">Yearly entitlement & usage</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {activeTab === 'review' && selectedReviewLeaveItem
+                    ? `${selectedReviewLeaveItem.department_name} · ID: ${selectedReviewLeaveItem.user_student_id}`
+                    : 'Yearly entitlement & usage'}
+                </p>
               </div>
               <span className="badge badge-success text-[11px] font-bold px-2.5 py-0.5">
                 {new Date().getFullYear()}
               </span>
             </div>
 
-            {/* Visual Progress Bar */}
-            <div className="space-y-2">
-              <div className="flex justify-between text-xs font-semibold">
-                <span className="text-slate-400">Used Entitlement</span>
-                <span className="text-cyan-300">{summary.leave_taken} / {summary.yearly_entitlement} Days ({usedPercentage}%)</span>
+            {inspectedLoading ? (
+              <div className="py-8 space-y-3 animate-pulse">
+                <div className="h-4 bg-slate-800 rounded w-3/4" />
+                <div className="h-10 bg-slate-800 rounded" />
+                <div className="h-10 bg-slate-800 rounded" />
               </div>
-              <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
-                <div
-                  className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 rounded-full transition-all duration-500"
-                  style={{ width: `${usedPercentage}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Summary Metrics Cards */}
-            <div className="space-y-3">
-              {/* Entitlement */}
-              <div className="flex items-center justify-between p-3 rounded-xl bg-slate-800/40 border border-slate-700/40">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
-                    <Calendar size={16} />
+            ) : (
+              <>
+                {/* Visual Progress Bar */}
+                <div className="space-y-2">
+                  <div className="flex justify-between text-xs font-semibold">
+                    <span className="text-slate-400">Used Entitlement</span>
+                    <span className="text-cyan-300">{activeSummary.leave_taken} / {activeSummary.yearly_entitlement} Days ({usedPercentage}%)</span>
                   </div>
-                  <div>
-                    <p className="text-xs font-medium text-slate-400">Yearly Entitlement</p>
-                    <p className="text-xs text-slate-500">Fixed annual quota</p>
+                  <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+                    <div
+                      className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 rounded-full transition-all duration-500"
+                      style={{ width: `${usedPercentage}%` }}
+                    />
                   </div>
                 </div>
-                <span className="text-sm font-bold text-slate-100">{summary.yearly_entitlement} Days</span>
-              </div>
 
-              {/* Leave Taken */}
-              <div className="flex items-center justify-between p-3 rounded-xl bg-slate-800/40 border border-slate-700/40">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                    <CheckCircle2 size={16} />
+                {/* Summary Metrics Cards */}
+                <div className="space-y-3">
+                  {/* Entitlement */}
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-slate-800/40 border border-slate-700/40">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+                        <Calendar size={16} />
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-slate-400">Yearly Entitlement</p>
+                        <p className="text-xs text-slate-500">Fixed annual quota</p>
+                      </div>
+                    </div>
+                    <span className="text-sm font-bold text-slate-100">{activeSummary.yearly_entitlement} Days</span>
                   </div>
-                  <div>
-                    <p className="text-xs font-medium text-slate-400">Leave Taken</p>
-                    <p className="text-xs text-slate-500">Total approved leaves</p>
+
+                  {/* Leave Taken */}
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-slate-800/40 border border-slate-700/40">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                        <CheckCircle2 size={16} />
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-slate-400">Leave Taken</p>
+                        <p className="text-xs text-slate-500">Total approved leaves</p>
+                      </div>
+                    </div>
+                    <span className="text-sm font-bold text-emerald-400">{activeSummary.leave_taken} Days</span>
+                  </div>
+
+                  {/* Pending Leave */}
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-slate-800/40 border border-slate-700/40">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                        <Clock size={16} />
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-slate-400">Pending Requests</p>
+                        <p className="text-xs text-slate-500">Awaiting approval</p>
+                      </div>
+                    </div>
+                    <span className="text-sm font-bold text-amber-400">{activeSummary.pending_leave} Days</span>
+                  </div>
+
+                  {/* Remaining Leave */}
+                  <div className="flex items-center justify-between p-3.5 rounded-xl bg-gradient-to-r from-cyan-950/40 to-slate-800/60 border border-cyan-500/30">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-300">
+                        <Sparkles size={16} />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-slate-200">Remaining Balance</p>
+                        <p className="text-[10px] text-slate-400">Available to request</p>
+                      </div>
+                    </div>
+                    <span className="text-base font-extrabold text-cyan-300">{activeSummary.remaining_leave} Days</span>
+                  </div>
+
+                  {/* Last Leave Date */}
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-slate-800/40 border border-slate-700/40">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-slate-700/40 border border-slate-600/30 flex items-center justify-center text-slate-400">
+                        <CalendarCheck size={16} />
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-slate-400">Last Leave Date</p>
+                        <p className="text-xs text-slate-500">Latest approved end date</p>
+                      </div>
+                    </div>
+                    <span className="text-xs font-semibold text-slate-200">{activeSummary.last_leave_date}</span>
                   </div>
                 </div>
-                <span className="text-sm font-bold text-emerald-400">{summary.leave_taken} Days</span>
-              </div>
 
-              {/* Pending Leave */}
-              <div className="flex items-center justify-between p-3 rounded-xl bg-slate-800/40 border border-slate-700/40">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
-                    <Clock size={16} />
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-slate-400">Pending Requests</p>
-                    <p className="text-xs text-slate-500">Awaiting approval</p>
-                  </div>
+                <div className="p-3 rounded-xl bg-slate-800/30 border border-slate-700/30 text-[11px] text-slate-400 flex items-start gap-2">
+                  <Info size={15} className="text-cyan-400 flex-shrink-0 mt-0.5" />
+                  <span>
+                    {activeTab === 'review'
+                      ? `Viewing ${selectedReviewLeaveItem ? selectedReviewLeaveItem.user_name : 'applicant'}'s leave quota. Click any application card on the left to inspect applicant summary.`
+                      : 'Remaining leave automatically updates whenever an application is approved by Admin/HR.'}
+                  </span>
                 </div>
-                <span className="text-sm font-bold text-amber-400">{summary.pending_leave} Days</span>
-              </div>
-
-              {/* Remaining Leave */}
-              <div className="flex items-center justify-between p-3.5 rounded-xl bg-gradient-to-r from-cyan-950/40 to-slate-800/60 border border-cyan-500/30">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-300">
-                    <Sparkles size={16} />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-200">Remaining Balance</p>
-                    <p className="text-[10px] text-slate-400">Available to request</p>
-                  </div>
-                </div>
-                <span className="text-base font-extrabold text-cyan-300">{summary.remaining_leave} Days</span>
-              </div>
-
-              {/* Last Leave Date */}
-              <div className="flex items-center justify-between p-3 rounded-xl bg-slate-800/40 border border-slate-700/40">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-slate-700/40 border border-slate-600/30 flex items-center justify-center text-slate-400">
-                    <CalendarCheck size={16} />
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-slate-400">Last Leave Date</p>
-                    <p className="text-xs text-slate-500">Latest approved end date</p>
-                  </div>
-                </div>
-                <span className="text-xs font-semibold text-slate-200">{summary.last_leave_date}</span>
-              </div>
-            </div>
-
-            <div className="p-3 rounded-xl bg-slate-800/30 border border-slate-700/30 text-[11px] text-slate-400 flex items-start gap-2">
-              <Info size={15} className="text-cyan-400 flex-shrink-0 mt-0.5" />
-              <span>
-                Remaining leave automatically updates whenever an application is approved by Admin/HR. Drafts remain private until submitted.
-              </span>
-            </div>
+              </>
+            )}
           </div>
         </div>
       </div>

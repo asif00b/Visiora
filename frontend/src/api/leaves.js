@@ -1,7 +1,7 @@
 import api from './axios'
 
 export const getMyLeaves = () => api.get('/api/leaves/my-leaves')
-export const getLeaveSummary = () => api.get('/api/leaves/summary')
+export const getLeaveSummary = (userId) => api.get(userId ? `/api/leaves/summary/${userId}` : '/api/leaves/summary')
 export const applyLeave = (data) => api.post('/api/leaves/apply', data)
 export const updateLeave = (id, data) => api.put(`/api/leaves/${id}`, data)
 export const getAlternativeUsers = () => api.get('/api/leaves/users')
