@@ -133,6 +133,7 @@ def _validate_schema():
         "unknown_faces",
         "system_config",
         "profile_change_requests",
+        "leaves",
     }
     missing = required - existing
     if missing:

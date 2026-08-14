@@ -15,6 +15,7 @@ import Scanner from './pages/Scanner'
 import AdminConfig from './pages/Admin/Config'
 import UnknownFaces from './pages/Admin/UnknownFaces'
 import ProfileRequests from './pages/Admin/ProfileRequests'
+import LeaveManagement from './pages/Leaves/LeaveManagement'
 
 export default function App() {
   return (
@@ -29,6 +30,7 @@ export default function App() {
             <Route element={<Layout />}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/leaves" element={<LeaveManagement />} />
               <Route path="/users/:id" element={<UserProfile />} />
 
               {/* Backward compatibility route for student profiles */}
