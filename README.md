@@ -1,4 +1,4 @@
-# Visiora — Face Recognition Attendance System (v6)
+# Visiora — AI Organizational Suite (v6)
 
 [![Python](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/)
 [![React](https://img.shields.io/badge/frontend-React%20%2B%20Vite-61dafb.svg)](https://react.dev/)

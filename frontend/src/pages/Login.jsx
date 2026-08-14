@@ -146,7 +146,7 @@ export default function Login() {
             </svg>
           </div>
           <h1 className="text-3xl font-black text-gradient tracking-tight">Visiora</h1>
-          <p className="text-slate-500 mt-1 text-sm font-medium">Recognize. Verify. Record.</p>
+          <p className="text-cyan-400 mt-1 text-xs font-semibold tracking-wide uppercase">AI Organizational Suite</p>
         </div>
 
         {/* Card */}
@@ -219,7 +219,7 @@ export default function Login() {
           </form>
 
           <div className="mt-6 pt-4 border-t border-slate-700/40 text-center">
-            <p className="text-[10px] text-slate-600">© {new Date().getFullYear()} Visiora — Face Recognition Attendance System</p>
+            <p className="text-[10px] text-slate-600">© {new Date().getFullYear()} Visiora — AI Organizational Suite</p>
           </div>
         </div>
       </div>

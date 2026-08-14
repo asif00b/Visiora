@@ -49,7 +49,7 @@ def wait_for_backend(url="http://localhost:5000/api/health", timeout=30):
 def main():
     os.system('cls' if os.name == 'nt' else 'clear')
     print(f"{CYAN}{BOLD}============================================================{RESET}")
-    print(f"{CYAN}{BOLD}   Starting Visiora — Face Recognition Attendance System   {RESET}")
+    print(f"{CYAN}{BOLD}   Starting Visiora — AI Organizational Suite              {RESET}")
     print(f"{CYAN}{BOLD}============================================================{RESET}\n")
 
     # 1. Build Frontend (production)

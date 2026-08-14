@@ -55,7 +55,7 @@ def create_app():
     setup_logging(log_dir)
 
     logger = logging.getLogger(__name__)
-    logger.info('Starting Visiora — Face Recognition Attendance System v6.0.0')
+    logger.info('Starting Visiora — AI Organizational Suite v6.0.0')
 
     app = Flask(__name__)
     app.config.from_object(Config)
@@ -133,7 +133,7 @@ def create_app():
         if os.path.isfile(os.path.join(dist, 'index.html')):
             return send_from_directory(dist, 'index.html')
         return jsonify({
-            'name': 'Visiora — Face Recognition Attendance System Backend',
+            'name': 'Visiora — AI Organizational Suite Backend',
             'status': 'active',
             'version': '6.1.0',
             'hint': 'Run "npm run build" in frontend/ to enable web UI'
@@ -173,7 +173,7 @@ def create_app():
 if __name__ == '__main__':
     app = create_app()
     print('\n' + '=' * 55)
-    print('  Visiora — Face Recognition Attendance System · Backend v6.1')
+    print('  Visiora — AI Organizational Suite · Backend v6.1')
     print('  Running on http://localhost:5000')
     is_debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
     app.run(host='0.0.0.0', port=5000, debug=is_debug, use_reloader=is_debug)
