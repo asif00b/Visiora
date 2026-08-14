@@ -76,13 +76,19 @@ def get_my_summary():
 @jwt_required()
 @require_auth
 def get_alternative_users():
-    """Get list of active users to select as an alternative user during leave."""
+    """Get list of active users from the SAME department to select as an alternative user during leave."""
     try:
         current = get_current_user()
-        users = User.query.filter(
+        q = User.query.filter(
             User.is_active == True,
             User.id != current.id
-        ).order_by(User.name.asc()).all()
+        )
+        if current.dept_id is not None:
+            q = q.filter(User.dept_id == current.dept_id)
+        else:
+            q = q.filter(User.dept_id.is_(None))
+
+        users = q.order_by(User.name.asc()).all()
 
         user_list = [{
             'id': u.id,
@@ -144,7 +150,7 @@ def apply_leave():
                 'message': f'Requested leave ({total_days} days) exceeds your remaining leave balance ({summary["remaining_leave"]} days).'
             }), 400
 
-        # Optional alternative user check
+        # Optional alternative user check (must be from the same department)
         parsed_alt_id = None
         if alt_user_id and str(alt_user_id).strip() not in ('', 'null', 'None'):
             parsed_alt_id = int(alt_user_id)
@@ -152,6 +158,8 @@ def apply_leave():
                 alt_user = User.query.get(parsed_alt_id)
                 if not alt_user:
                     return jsonify({'success': False, 'message': 'Selected alternative user does not exist'}), 400
+                if current.dept_id is not None and alt_user.dept_id != current.dept_id:
+                    return jsonify({'success': False, 'message': 'Alternative cover user must belong to your department'}), 400
 
         leave = Leave(
             user_id=current.id,

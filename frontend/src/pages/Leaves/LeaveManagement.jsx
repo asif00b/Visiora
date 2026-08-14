@@ -536,14 +536,14 @@ export default function LeaveManagement() {
                 {/* Alternative User */}
                 <div>
                   <label className="label">
-                    Alternative Cover User <span className="text-slate-500 font-normal">(Optional)</span>
+                    Alternative Cover User (Department Colleague) <span className="text-slate-500 font-normal">(Optional)</span>
                   </label>
                   <select
                     value={formData.alternative_user_id}
                     onChange={(e) => setFormData(f => ({ ...f, alternative_user_id: e.target.value }))}
                     className="select text-xs py-2"
                   >
-                    <option value="">-- Select alternative user to handle duties --</option>
+                    <option value="">-- Select a colleague from your department --</option>
                     {altUsers.map((u) => (
                       <option key={u.id} value={u.id}>
                         {u.name} ({u.department_name}) - ID: {u.student_id}
@@ -551,7 +551,7 @@ export default function LeaveManagement() {
                     ))}
                   </select>
                   <p className="text-[11px] text-slate-500 mt-1">
-                    Select a team member who will cover your tasks while on leave.
+                    Select a team member from your department who will cover your tasks while on leave.
                   </p>
                 </div>
 
