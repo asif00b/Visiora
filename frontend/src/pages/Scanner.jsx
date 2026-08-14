@@ -153,18 +153,26 @@ export default function Scanner() {
     if (!ctx) return
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-    const scaleX = canvas.width / (video.videoWidth || canvas.width)
-    const scaleY = canvas.height / (video.videoHeight || canvas.height)
+    // Backend face coordinates are in the CAPTURED frame resolution (downscaled),
+    // not the native camera resolution. Mirror the captureFrame downscale logic:
+    const nativeW = video.videoWidth || 640
+    const nativeH = video.videoHeight || 480
+    const captureScale = nativeW > scannerFrameMaxWidth ? scannerFrameMaxWidth / nativeW : 1
+    const capturedW = Math.round(nativeW * captureScale)
+    const capturedH = Math.round(nativeH * captureScale)
+
+    const scaleX = canvas.width / capturedW
+    const scaleY = canvas.height / capturedH
     const activeDebug = debugRef.current
 
     if (faces.length > 0 && faces.some(f => f.matched)) {
       const primaryFace = faces.find(f => f.matched)
       if (primaryFace && (primaryFace.location || primaryFace.box)) {
         const [top, right, bottom, left] = primaryFace.location || [
-          primaryFace.box.top * (video.videoHeight || 480),
-          primaryFace.box.right * (video.videoWidth || 640),
-          primaryFace.box.bottom * (video.videoHeight || 480),
-          primaryFace.box.left * (video.videoWidth || 640)
+          primaryFace.box.top * capturedH,
+          primaryFace.box.right * capturedW,
+          primaryFace.box.bottom * capturedH,
+          primaryFace.box.left * capturedW
         ]
         const fw = (right - left) * scaleX
         const fh = (bottom - top) * scaleY
@@ -194,10 +202,10 @@ export default function Scanner() {
 
     faces.forEach((face) => {
       const loc = face.location || (face.box ? [
-        face.box.top * (video.videoHeight || 480),
-        face.box.right * (video.videoWidth || 640),
-        face.box.bottom * (video.videoHeight || 480),
-        face.box.left * (video.videoWidth || 640)
+        face.box.top * capturedH,
+        face.box.right * capturedW,
+        face.box.bottom * capturedH,
+        face.box.left * capturedW
       ] : null)
 
       if (!loc) return
@@ -210,9 +218,9 @@ export default function Scanner() {
       const padH = rawH * 0.18
 
       left = Math.max(0, left - padW)
-      right = Math.min(video.videoWidth || 640, right + padW)
+      right = Math.min(capturedW, right + padW)
       top = Math.max(0, top - padH * 1.2)
-      bottom = Math.min(video.videoHeight || 480, bottom + padH * 0.8)
+      bottom = Math.min(capturedH, bottom + padH * 0.8)
 
       let x = left * scaleX
       const y = top * scaleY
