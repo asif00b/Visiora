@@ -110,16 +110,20 @@ def get_alternative_users():
 @jwt_required()
 @require_auth
 def apply_leave():
-    """Apply for a new leave."""
+    """Apply for a new leave or save as draft."""
     try:
         current = get_current_user()
         data = request.get_json() or {}
 
         leave_type = data.get('leave_type')
-        reason = data.get('reason')
+        reason = data.get('reason', '').strip()
         start_date_str = data.get('start_date')
         end_date_str = data.get('end_date')
         alt_user_id = data.get('alternative_user_id')
+        target_status = str(data.get('status', 'pending')).lower().strip()
+
+        if target_status not in ['draft', 'pending']:
+            target_status = 'pending'
 
         if not leave_type or leave_type not in VALID_LEAVE_TYPES:
             return jsonify({
@@ -127,30 +131,37 @@ def apply_leave():
                 'message': f'Invalid leave type. Must be one of: {", ".join(VALID_LEAVE_TYPES)}'
             }), 400
 
-        if not reason or not str(reason).strip():
-            return jsonify({'success': False, 'message': 'Leave reason is required'}), 400
+        # Drafts can be partially filled, but if submitting as pending, require full fields
+        if target_status == 'pending':
+            if not reason:
+                return jsonify({'success': False, 'message': 'Leave reason is required'}), 400
+            if not start_date_str or not end_date_str:
+                return jsonify({'success': False, 'message': 'Start date and end date are required'}), 400
 
-        if not start_date_str or not end_date_str:
-            return jsonify({'success': False, 'message': 'Start date and end date are required'}), 400
+        start_d = None
+        end_d = None
+        total_days = 1
 
-        try:
-            start_d = datetime.strptime(start_date_str, '%Y-%m-%d').date()
-            end_d = datetime.strptime(end_date_str, '%Y-%m-%d').date()
-        except ValueError:
-            return jsonify({'success': False, 'message': 'Dates must be in YYYY-MM-DD format'}), 400
+        if start_date_str and end_date_str:
+            try:
+                start_d = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                end_d = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+                if start_d > end_d:
+                    return jsonify({'success': False, 'message': 'Start date cannot be after end date'}), 400
+                total_days = (end_d - start_d).days + 1
+            except ValueError:
+                return jsonify({'success': False, 'message': 'Dates must be in YYYY-MM-DD format'}), 400
+        elif target_status == 'pending':
+            return jsonify({'success': False, 'message': 'Valid start and end dates are required'}), 400
 
-        if start_d > end_d:
-            return jsonify({'success': False, 'message': 'Start date cannot be after end date'}), 400
-
-        total_days = (end_d - start_d).days + 1
-
-        # Calculate remaining entitlement
-        summary = _calculate_user_leave_summary(current.id)
-        if total_days > summary['remaining_leave']:
-            return jsonify({
-                'success': False,
-                'message': f'Requested leave ({total_days} days) exceeds your remaining leave balance ({summary["remaining_leave"]} days).'
-            }), 400
+        # Calculate remaining entitlement for pending leaves
+        if target_status == 'pending':
+            summary = _calculate_user_leave_summary(current.id)
+            if total_days > summary['remaining_leave']:
+                return jsonify({
+                    'success': False,
+                    'message': f'Requested leave ({total_days} days) exceeds your remaining leave balance ({summary["remaining_leave"]} days).'
+                }), 400
 
         # Optional alternative user check
         parsed_alt_id = None
@@ -161,25 +172,32 @@ def apply_leave():
                 if not alt_user or not alt_user.is_active:
                     return jsonify({'success': False, 'message': 'Selected alternative user is invalid or inactive'}), 400
 
+        # Create today default dates for draft if not selected yet
+        if not start_d:
+            start_d = datetime.now().date()
+        if not end_d:
+            end_d = start_d
+
         leave = Leave(
             user_id=current.id,
             leave_type=leave_type,
-            reason=str(reason).strip(),
+            reason=reason,
             start_date=start_d,
             end_date=end_d,
             total_days=total_days,
             alternative_user_id=parsed_alt_id,
-            status='pending',
+            status=target_status,
             applied_at=datetime.now()
         )
         db.session.add(leave)
         db.session.commit()
 
-        logger.info(f'[Leaves] User {current.id} ({current.name}) applied for {total_days} day(s) {leave_type} leave')
+        msg = 'Leave draft saved successfully!' if target_status == 'draft' else 'Leave application submitted successfully!'
+        logger.info(f'[Leaves] User {current.id} ({current.name}) saved leave ({target_status})')
 
         return jsonify({
             'success': True,
-            'message': 'Leave application submitted successfully!',
+            'message': msg,
             'leave': leave.to_dict(),
             'summary': _calculate_user_leave_summary(current.id)
         }), 201
@@ -187,6 +205,99 @@ def apply_leave():
     except Exception as e:
         db.session.rollback()
         logger.error(f'[Leaves] Apply error: {e}')
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@leaves_bp.route('/leaves/<int:leave_id>', methods=['PUT'])
+@jwt_required()
+@require_auth
+def update_leave(leave_id):
+    """Update or submit an existing draft / pending leave application."""
+    try:
+        current = get_current_user()
+        leave = Leave.query.get_or_404(leave_id)
+
+        # Only owner or admin can edit
+        if current.role in ['user', 'student'] and leave.user_id != current.id:
+            return jsonify({'success': False, 'message': 'Access denied'}), 403
+
+        if current.role in ['user', 'student'] and leave.status not in ['draft', 'pending']:
+            return jsonify({'success': False, 'message': 'Cannot edit an application that is already approved or rejected'}), 400
+
+        data = request.get_json() or {}
+        leave_type = data.get('leave_type', leave.leave_type)
+        reason = data.get('reason', leave.reason or '').strip()
+        start_date_str = data.get('start_date')
+        end_date_str = data.get('end_date')
+        alt_user_id = data.get('alternative_user_id')
+        target_status = str(data.get('status', leave.status)).lower().strip()
+
+        if leave_type not in VALID_LEAVE_TYPES:
+            return jsonify({'success': False, 'message': 'Invalid leave type'}), 400
+
+        start_d = leave.start_date
+        end_d = leave.end_date
+
+        if start_date_str:
+            try:
+                start_d = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify({'success': False, 'message': 'Invalid start date format'}), 400
+
+        if end_date_str:
+            try:
+                end_d = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify({'success': False, 'message': 'Invalid end date format'}), 400
+
+        if start_d and end_d and start_d > end_d:
+            return jsonify({'success': False, 'message': 'Start date cannot be after end date'}), 400
+
+        total_days = (end_d - start_d).days + 1 if (start_d and end_d) else 1
+
+        if target_status == 'pending':
+            if not reason:
+                return jsonify({'success': False, 'message': 'Leave reason is required'}), 400
+            summary = _calculate_user_leave_summary(current.id)
+            if total_days > summary['remaining_leave']:
+                return jsonify({
+                    'success': False,
+                    'message': f'Requested leave ({total_days} days) exceeds your remaining leave balance ({summary["remaining_leave"]} days).'
+                }), 400
+
+        parsed_alt_id = leave.alternative_user_id
+        if 'alternative_user_id' in data:
+            if alt_user_id and str(alt_user_id).strip() not in ('', 'null', 'None'):
+                parsed_alt_id = int(alt_user_id)
+                if parsed_alt_id != current.id:
+                    alt_user = User.query.get(parsed_alt_id)
+                    if not alt_user or not alt_user.is_active:
+                        return jsonify({'success': False, 'message': 'Selected alternative user is invalid or inactive'}), 400
+            else:
+                parsed_alt_id = None
+
+        leave.leave_type = leave_type
+        leave.reason = reason
+        leave.start_date = start_d
+        leave.end_date = end_d
+        leave.total_days = total_days
+        leave.alternative_user_id = parsed_alt_id
+        leave.status = target_status
+        leave.applied_at = datetime.now()
+
+        db.session.commit()
+
+        msg = 'Leave draft updated successfully!' if target_status == 'draft' else 'Leave application submitted successfully!'
+        return jsonify({
+            'success': True,
+            'message': msg,
+            'leave': leave.to_dict(),
+            'summary': _calculate_user_leave_summary(current.id)
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f'[Leaves] Update error: {e}')
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
@@ -214,9 +325,10 @@ def get_my_leaves():
 @jwt_required()
 @require_role('admin', 'hr')
 def get_all_leaves():
-    """Get all leave applications for review (Admin & HR)."""
+    """Get all submitted leave applications for review (Admin & HR). Drafts are excluded."""
     try:
-        q = Leave.query.join(User, Leave.user_id == User.id)
+        # Exclude draft leaves from admin/hr review queue
+        q = Leave.query.filter(Leave.status != 'draft').join(User, Leave.user_id == User.id)
 
         status_filter = request.args.get('status')
         dept_id_filter = request.args.get('dept_id', type=int)
@@ -283,24 +395,24 @@ def review_leave(leave_id):
 @jwt_required()
 @require_auth
 def delete_leave(leave_id):
-    """Cancel / Delete a leave application."""
+    """Cancel / Delete a leave application or draft."""
     try:
         current = get_current_user()
         leave = Leave.query.get_or_404(leave_id)
 
-        # Non-admins can only cancel their own pending requests
+        # Non-admins can only delete their own draft or pending requests
         if current.role in ['user', 'student'] and leave.user_id != current.id:
             return jsonify({'success': False, 'message': 'Access denied'}), 403
 
-        if current.role in ['user', 'student'] and leave.status != 'pending':
-            return jsonify({'success': False, 'message': 'Cannot cancel an application that is already approved or rejected'}), 400
+        if current.role in ['user', 'student'] and leave.status not in ['draft', 'pending']:
+            return jsonify({'success': False, 'message': 'Cannot delete an application that is already approved or rejected'}), 400
 
         db.session.delete(leave)
         db.session.commit()
 
         logger.info(f'[Leaves] Leave {leave_id} deleted/cancelled by user {current.id}')
 
-        return jsonify({'success': True, 'message': 'Leave application cancelled successfully'}), 200
+        return jsonify({'success': True, 'message': 'Leave application removed successfully'}), 200
 
     except Exception as e:
         db.session.rollback()

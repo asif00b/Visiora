@@ -4,6 +4,7 @@ import {
   getMyLeaves,
   getLeaveSummary,
   applyLeave,
+  updateLeave,
   getAlternativeUsers,
   getAllLeaves,
   reviewLeave,
@@ -27,7 +28,9 @@ import {
   Check,
   X,
   Search,
-  CalendarCheck
+  CalendarCheck,
+  FileEdit,
+  Save
 } from 'lucide-react'
 
 const LEAVE_TYPES = ['Casual', 'Medical', 'Festival']
@@ -39,6 +42,11 @@ const TYPE_COLORS = {
 }
 
 const STATUS_BADGES = {
+  draft: {
+    label: 'Draft',
+    icon: FileEdit,
+    className: 'bg-purple-500/10 text-purple-400 border-purple-500/30',
+  },
   pending: {
     label: 'Pending',
     icon: Clock,
@@ -73,10 +81,12 @@ export default function LeaveManagement() {
   const [altUsers, setAltUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [savingDraft, setSavingDraft] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
   // Form states
+  const [editingLeaveId, setEditingLeaveId] = useState(null)
   const [formData, setFormData] = useState({
     leave_type: 'Casual',
     reason: '',
@@ -125,6 +135,35 @@ export default function LeaveManagement() {
     fetchData()
   }, [fetchData])
 
+  // Reset form
+  const resetForm = () => {
+    setEditingLeaveId(null)
+    setFormData({
+      leave_type: 'Casual',
+      reason: '',
+      start_date: '',
+      end_date: '',
+      alternative_user_id: '',
+    })
+    setError('')
+    setSuccess('')
+  }
+
+  // Edit draft item
+  const handleEditDraft = (l) => {
+    setEditingLeaveId(l.id)
+    setFormData({
+      leave_type: l.leave_type || 'Casual',
+      reason: l.reason || '',
+      start_date: l.start_date || '',
+      end_date: l.end_date || '',
+      alternative_user_id: l.alternative_user_id ? String(l.alternative_user_id) : '',
+    })
+    setError('')
+    setSuccess('')
+    setActiveTab('apply')
+  }
+
   // Calculate days for form preview
   const calculatedFormDays = (() => {
     if (!formData.start_date || !formData.end_date) return 0
@@ -134,41 +173,53 @@ export default function LeaveManagement() {
     return Math.floor((end - start) / (1000 * 60 * 60 * 24)) + 1
   })()
 
-  // Form submit handler
-  const handleApplySubmit = async (e) => {
-    e.preventDefault()
+  // Form submit / draft save handler
+  const handleFormSubmit = async (targetStatus = 'pending') => {
     setError('')
     setSuccess('')
 
-    if (!formData.reason.trim()) {
-      setError('Please provide a reason for your leave request.')
-      return
-    }
-    if (!formData.start_date || !formData.end_date) {
-      setError('Please select both start and end dates.')
-      return
-    }
-    if (calculatedFormDays <= 0) {
-      setError('Start date cannot be after end date.')
-      return
-    }
-    if (calculatedFormDays > summary.remaining_leave) {
-      setError(`Requested duration (${calculatedFormDays} days) exceeds your remaining leave entitlement (${summary.remaining_leave} days).`)
-      return
+    if (targetStatus === 'pending') {
+      if (!formData.reason.trim()) {
+        setError('Please provide a reason for your leave request.')
+        return
+      }
+      if (!formData.start_date || !formData.end_date) {
+        setError('Please select both start and end dates.')
+        return
+      }
+      if (calculatedFormDays <= 0) {
+        setError('Start date cannot be after end date.')
+        return
+      }
+      if (calculatedFormDays > summary.remaining_leave) {
+        setError(`Requested duration (${calculatedFormDays} days) exceeds your remaining leave entitlement (${summary.remaining_leave} days).`)
+        return
+      }
     }
 
-    setSubmitting(true)
+    if (targetStatus === 'draft') {
+      setSavingDraft(true)
+    } else {
+      setSubmitting(true)
+    }
+
     try {
-      const res = await applyLeave(formData)
+      const payload = {
+        ...formData,
+        status: targetStatus,
+      }
+
+      let res
+      if (editingLeaveId) {
+        res = await updateLeave(editingLeaveId, payload)
+      } else {
+        res = await applyLeave(payload)
+      }
+
       if (res.data.success) {
-        setSuccess('Leave application submitted successfully!')
-        setFormData({
-          leave_type: 'Casual',
-          reason: '',
-          start_date: '',
-          end_date: '',
-          alternative_user_id: '',
-        })
+        const msg = targetStatus === 'draft' ? 'Leave draft saved successfully!' : 'Leave application submitted successfully!'
+        setSuccess(msg)
+        resetForm()
         fetchData()
         setTimeout(() => {
           setActiveTab('my_leaves')
@@ -176,20 +227,34 @@ export default function LeaveManagement() {
         }, 1200)
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to submit leave application.')
+      setError(err.response?.data?.message || 'Failed to process leave application.')
     } finally {
       setSubmitting(false)
+      setSavingDraft(false)
     }
   }
 
-  // Cancel pending leave
-  const handleCancelLeave = async (leaveId) => {
-    if (!window.confirm('Are you sure you want to cancel this pending leave request?')) return
+  // Directly submit a draft request from the list
+  const handleSubmitDraftDirectly = async (leaveId) => {
+    try {
+      await updateLeave(leaveId, { status: 'pending' })
+      fetchData()
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to submit draft application.')
+    }
+  }
+
+  // Cancel / Delete pending or draft leave
+  const handleCancelLeave = async (leaveId, isDraft = false) => {
+    const confirmMsg = isDraft
+      ? 'Are you sure you want to discard this draft leave request?'
+      : 'Are you sure you want to cancel this pending leave request?'
+    if (!window.confirm(confirmMsg)) return
     try {
       await deleteLeave(leaveId)
       fetchData()
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to cancel leave request.')
+      alert(err.response?.data?.message || 'Failed to remove leave request.')
     }
   }
 
@@ -239,6 +304,7 @@ export default function LeaveManagement() {
   })
 
   const pendingReviewCount = allLeaves.filter(l => l.status === 'pending').length
+  const draftCount = myLeaves.filter(l => l.status === 'draft').length
 
   const usedPercentage = Math.min(100, Math.round((summary.leave_taken / summary.yearly_entitlement) * 100))
 
@@ -252,15 +318,14 @@ export default function LeaveManagement() {
             <span className="text-gradient">Leave Management</span>
           </h1>
           <p className="section-subtitle">
-            Submit leave applications, select alternative cover, and track approval status.
+            Submit leave applications, save drafts, select alternative cover, and track approval status.
           </p>
         </div>
 
         <button
           onClick={() => {
+            resetForm()
             setActiveTab('apply')
-            setError('')
-            setSuccess('')
           }}
           className="btn-primary text-xs flex items-center gap-2 py-2.5 px-4 w-fit"
         >
@@ -285,10 +350,18 @@ export default function LeaveManagement() {
             >
               <FileText size={15} />
               My Applications ({myLeaves.length})
+              {draftCount > 0 && (
+                <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold px-1.5 py-0.2 text-[10px] rounded-full">
+                  {draftCount} draft
+                </span>
+              )}
             </button>
 
             <button
-              onClick={() => setActiveTab('apply')}
+              onClick={() => {
+                if (activeTab !== 'apply') resetForm()
+                setActiveTab('apply')
+              }}
               className={`flex items-center gap-2 text-xs font-semibold px-4 py-2 rounded-lg transition-all ${
                 activeTab === 'apply'
                   ? 'bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 shadow-sm'
@@ -296,7 +369,7 @@ export default function LeaveManagement() {
               }`}
             >
               <Plus size={15} />
-              Apply for Leave
+              {editingLeaveId ? 'Edit Draft' : 'Apply for Leave'}
             </button>
 
             {canManage && (
@@ -329,13 +402,13 @@ export default function LeaveManagement() {
                     My Leave Applications
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    History of your submitted requests and status updates.
+                    History of your submitted requests, drafts, and status updates.
                   </p>
                 </div>
 
                 {/* Filter presets */}
-                <div className="flex gap-1 bg-slate-800/60 p-1 rounded-lg border border-slate-700/40 text-xs">
-                  {['all', 'pending', 'approved', 'rejected'].map((st) => (
+                <div className="flex gap-1 bg-slate-800/60 p-1 rounded-lg border border-slate-700/40 text-xs flex-wrap">
+                  {['all', 'draft', 'pending', 'approved', 'rejected'].map((st) => (
                     <button
                       key={st}
                       onClick={() => setMyFilterStatus(st)}
@@ -376,11 +449,16 @@ export default function LeaveManagement() {
                     const stBadge = STATUS_BADGES[l.status] || STATUS_BADGES.pending
                     const StatusIcon = stBadge.icon
                     const typeColor = TYPE_COLORS[l.leave_type] || TYPE_COLORS.Casual
+                    const isDraft = l.status === 'draft'
 
                     return (
                       <div
                         key={l.id}
-                        className="p-4 rounded-xl bg-slate-800/40 border border-slate-700/40 hover:border-slate-700 transition-all space-y-3"
+                        className={`p-4 rounded-xl transition-all space-y-3 ${
+                          isDraft
+                            ? 'bg-purple-950/20 border border-purple-500/30 hover:border-purple-500/50'
+                            : 'bg-slate-800/40 border border-slate-700/40 hover:border-slate-700'
+                        }`}
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
@@ -392,15 +470,45 @@ export default function LeaveManagement() {
                             </span>
                           </div>
 
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2">
                             <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${stBadge.className}`}>
                               <StatusIcon size={13} />
                               {stBadge.label}
                             </span>
 
+                            {/* Actions for Draft items */}
+                            {isDraft && (
+                              <>
+                                <button
+                                  onClick={() => handleSubmitDraftDirectly(l.id)}
+                                  title="Submit Draft Now"
+                                  className="btn-primary text-xs py-1 px-3 flex items-center gap-1"
+                                >
+                                  <Send size={12} /> Submit
+                                </button>
+
+                                <button
+                                  onClick={() => handleEditDraft(l)}
+                                  title="Edit Draft"
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-purple-300 hover:bg-purple-500/10 transition-colors"
+                                >
+                                  <FileEdit size={15} />
+                                </button>
+
+                                <button
+                                  onClick={() => handleCancelLeave(l.id, true)}
+                                  title="Discard Draft"
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              </>
+                            )}
+
+                            {/* Cancel action for pending items */}
                             {l.status === 'pending' && (
                               <button
-                                onClick={() => handleCancelLeave(l.id)}
+                                onClick={() => handleCancelLeave(l.id, false)}
                                 title="Cancel Pending Request"
                                 className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
                               >
@@ -427,11 +535,11 @@ export default function LeaveManagement() {
 
                         <div className="text-xs bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 text-slate-300">
                           <span className="text-slate-500 font-semibold uppercase text-[10px] block mb-0.5">Reason:</span>
-                          {l.reason}
+                          {l.reason || <span className="text-slate-500 italic">No reason provided yet (Draft)</span>}
                         </div>
 
                         {/* Admin comment / review info if reviewed */}
-                        {l.status !== 'pending' && (
+                        {l.status !== 'pending' && l.status !== 'draft' && (
                           <div className="text-[11px] text-slate-400 pt-1 flex items-center justify-between flex-wrap gap-2 border-t border-slate-800/80">
                             <span>
                               Reviewed by <span className="text-slate-200 font-semibold">{l.reviewed_by_name || 'Admin'}</span>
@@ -449,17 +557,28 @@ export default function LeaveManagement() {
             </div>
           )}
 
-          {/* Tab 2: Apply for Leave Form */}
+          {/* Tab 2: Apply for Leave Form / Edit Draft */}
           {activeTab === 'apply' && (
             <div className="card space-y-6 p-6">
-              <div className="border-b border-slate-800 pb-4">
-                <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                  <Plus size={18} className="text-cyan-400" />
-                  Leave Application Form
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Fill out the details below to submit a new leave request.
-                </p>
+              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div>
+                  <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                    {editingLeaveId ? <FileEdit size={18} className="text-purple-400" /> : <Plus size={18} className="text-cyan-400" />}
+                    {editingLeaveId ? 'Edit Leave Draft' : 'Leave Application Form'}
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {editingLeaveId ? 'Update your draft details before submitting for approval.' : 'Fill out the details below to submit a new leave request or save as draft.'}
+                  </p>
+                </div>
+
+                {editingLeaveId && (
+                  <button
+                    onClick={resetForm}
+                    className="text-xs text-slate-400 hover:text-slate-200 btn-secondary py-1 px-3"
+                  >
+                    Cancel Editing
+                  </button>
+                )}
               </div>
 
               {error && (
@@ -476,7 +595,7 @@ export default function LeaveManagement() {
                 </div>
               )}
 
-              <form onSubmit={handleApplySubmit} className="space-y-4">
+              <form onSubmit={(e) => { e.preventDefault(); handleFormSubmit('pending'); }} className="space-y-4">
                 {/* Leave Type */}
                 <div>
                   <label className="label">Leave Type <span className="text-rose-400">*</span></label>
@@ -504,7 +623,6 @@ export default function LeaveManagement() {
                     <label className="label">Start Date <span className="text-rose-400">*</span></label>
                     <input
                       type="date"
-                      required
                       value={formData.start_date}
                       onChange={(e) => setFormData(f => ({ ...f, start_date: e.target.value }))}
                       className="input text-xs py-2"
@@ -515,7 +633,6 @@ export default function LeaveManagement() {
                     <label className="label">End Date <span className="text-rose-400">*</span></label>
                     <input
                       type="date"
-                      required
                       value={formData.end_date}
                       onChange={(e) => setFormData(f => ({ ...f, end_date: e.target.value }))}
                       className="input text-xs py-2"
@@ -560,7 +677,6 @@ export default function LeaveManagement() {
                   <label className="label">Leave Reason <span className="text-rose-400">*</span></label>
                   <textarea
                     rows={3}
-                    required
                     placeholder="Provide detailed explanation for your leave application..."
                     value={formData.reason}
                     onChange={(e) => setFormData(f => ({ ...f, reason: e.target.value }))}
@@ -569,18 +685,37 @@ export default function LeaveManagement() {
                 </div>
 
                 {/* Action Buttons */}
-                <div className="flex items-center justify-end gap-3 pt-2">
+                <div className="flex flex-wrap items-center justify-end gap-3 pt-2">
                   <button
                     type="button"
-                    onClick={() => setActiveTab('my_leaves')}
+                    onClick={() => {
+                      resetForm()
+                      setActiveTab('my_leaves')
+                    }}
                     className="btn-secondary text-xs py-2.5 px-4"
                   >
                     Cancel
                   </button>
 
                   <button
+                    type="button"
+                    disabled={savingDraft || submitting}
+                    onClick={() => handleFormSubmit('draft')}
+                    className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-purple-600/20 text-purple-300 border border-purple-500/30 hover:bg-purple-600/30 transition-all flex items-center gap-2"
+                  >
+                    {savingDraft ? (
+                      <span>Saving Draft...</span>
+                    ) : (
+                      <>
+                        <Save size={15} />
+                        Save as Draft
+                      </>
+                    )}
+                  </button>
+
+                  <button
                     type="submit"
-                    disabled={submitting}
+                    disabled={submitting || savingDraft}
                     className="btn-primary text-xs py-2.5 px-5 flex items-center gap-2"
                   >
                     {submitting ? (
@@ -843,7 +978,7 @@ export default function LeaveManagement() {
             <div className="p-3 rounded-xl bg-slate-800/30 border border-slate-700/30 text-[11px] text-slate-400 flex items-start gap-2">
               <Info size={15} className="text-cyan-400 flex-shrink-0 mt-0.5" />
               <span>
-                Remaining leave automatically updates whenever an application is approved by Admin/HR.
+                Remaining leave automatically updates whenever an application is approved by Admin/HR. Drafts remain private until submitted.
               </span>
             </div>
           </div>
