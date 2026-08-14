@@ -23,7 +23,6 @@ import {
   Trash2,
   Send,
   Sparkles,
-  Info,
   User,
   Check,
   X,
@@ -310,7 +309,7 @@ export default function LeaveManagement() {
 
   // Open Review modal
   const handleOpenReview = (e, leaveItem, action) => {
-    e.stopPropagation() // Prevent row click from overriding
+    e.stopPropagation()
     setSelectedReviewLeave(leaveItem)
     setReviewAction(action)
     setAdminComment('')
@@ -344,17 +343,14 @@ export default function LeaveManagement() {
   const usedPercentage = Math.min(100, Math.round((activeSummary.leave_taken / activeSummary.yearly_entitlement) * 100))
 
   return (
-    <div className="space-y-8 animate-fade-in">
+    <div className="space-y-6 animate-fade-in">
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="section-title flex items-center gap-2">
-            <Calendar className="text-cyan-400" size={28} />
+            <Calendar className="text-cyan-400" size={26} />
             <span className="text-gradient">Leave Management</span>
           </h1>
-          <p className="section-subtitle">
-            Submit leave applications, save drafts, select alternative cover, and track approval status.
-          </p>
         </div>
 
         <button
@@ -362,14 +358,14 @@ export default function LeaveManagement() {
             resetForm()
             setActiveTab('apply')
           }}
-          className="btn-primary text-xs flex items-center gap-2 py-2.5 px-4 w-fit"
+          className="btn-primary text-xs flex items-center gap-2 py-2 px-4 w-fit"
         >
-          <Plus size={16} />
+          <Plus size={15} />
           Apply for Leave
         </button>
       </div>
 
-      {/* Main Grid: Left 2 Columns for Form/Lists, Right 1 Column for Leave Summary */}
+      {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Section (Tabs & Content) */}
         <div className="lg:col-span-2 space-y-6">
@@ -431,15 +427,10 @@ export default function LeaveManagement() {
           {activeTab === 'my_leaves' && (
             <div className="card space-y-5 p-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
-                <div>
-                  <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                    <FileText size={18} className="text-cyan-400" />
-                    My Leave Applications
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    History of your submitted requests, drafts, and status updates.
-                  </p>
-                </div>
+                <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                  <FileText size={18} className="text-cyan-400" />
+                  My Leave Applications
+                </h3>
 
                 {/* Filter presets */}
                 <div className="flex gap-1 bg-slate-800/60 p-1 rounded-lg border border-slate-700/40 text-xs flex-wrap">
@@ -469,9 +460,6 @@ export default function LeaveManagement() {
                 <div className="text-center py-12 space-y-3">
                   <CalendarCheck size={40} className="mx-auto text-slate-600" />
                   <p className="text-sm font-semibold text-slate-400">No leave applications found</p>
-                  <p className="text-xs text-slate-500">
-                    {myFilterStatus !== 'all' ? `No requests with status "${myFilterStatus}".` : 'You have not submitted any leave applications yet.'}
-                  </p>
                   {myFilterStatus === 'all' && (
                     <button onClick={() => setActiveTab('apply')} className="btn-secondary text-xs mt-2 py-2 px-4">
                       Submit First Application
@@ -511,7 +499,6 @@ export default function LeaveManagement() {
                               {stBadge.label}
                             </span>
 
-                            {/* Actions for Draft items */}
                             {isDraft && (
                               <>
                                 <button
@@ -540,7 +527,6 @@ export default function LeaveManagement() {
                               </>
                             )}
 
-                            {/* Cancel action for pending items */}
                             {l.status === 'pending' && (
                               <button
                                 onClick={() => handleCancelLeave(l.id, false)}
@@ -553,7 +539,7 @@ export default function LeaveManagement() {
                           </div>
                         </div>
 
-                        {/* Dates & Reason */}
+                        {/* Dates & Details */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-400">
                           <div>
                             <span className="text-slate-500 font-medium">Duration: </span>
@@ -570,10 +556,9 @@ export default function LeaveManagement() {
 
                         <div className="text-xs bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 text-slate-300">
                           <span className="text-slate-500 font-semibold uppercase text-[10px] block mb-0.5">Reason:</span>
-                          {l.reason || <span className="text-slate-500 italic">No reason provided yet (Draft)</span>}
+                          {l.reason || <span className="text-slate-500 italic">No reason provided (Draft)</span>}
                         </div>
 
-                        {/* Admin comment / review info if reviewed */}
                         {l.status !== 'pending' && l.status !== 'draft' && (
                           <div className="text-[11px] text-slate-400 pt-1 flex items-center justify-between flex-wrap gap-2 border-t border-slate-800/80">
                             <span>
@@ -596,15 +581,10 @@ export default function LeaveManagement() {
           {activeTab === 'apply' && (
             <div className="card space-y-6 p-6">
               <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-                <div>
-                  <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                    {editingLeaveId ? <FileEdit size={18} className="text-purple-400" /> : <Plus size={18} className="text-cyan-400" />}
-                    {editingLeaveId ? 'Edit Leave Draft' : 'Leave Application Form'}
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    {editingLeaveId ? 'Update your draft details before submitting for approval.' : 'Fill out the details below to submit a new leave request or save as draft.'}
-                  </p>
-                </div>
+                <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                  {editingLeaveId ? <FileEdit size={18} className="text-purple-400" /> : <Plus size={18} className="text-cyan-400" />}
+                  {editingLeaveId ? 'Edit Leave Draft' : 'Leave Application Form'}
+                </h3>
 
                 {editingLeaveId && (
                   <button
@@ -678,7 +658,7 @@ export default function LeaveManagement() {
                 {/* Duration Readout */}
                 {calculatedFormDays > 0 && (
                   <div className="p-3 rounded-xl bg-cyan-950/30 border border-cyan-500/20 text-cyan-300 text-xs flex items-center justify-between">
-                    <span className="font-medium">Total Calculated Leave Duration:</span>
+                    <span className="font-medium">Calculated Duration:</span>
                     <span className="font-bold text-sm bg-cyan-500/20 px-2.5 py-0.5 rounded-md border border-cyan-500/30">
                       {calculatedFormDays} {calculatedFormDays === 1 ? 'Day' : 'Days'}
                     </span>
@@ -695,16 +675,13 @@ export default function LeaveManagement() {
                     onChange={(e) => setFormData(f => ({ ...f, alternative_user_id: e.target.value }))}
                     className="select text-xs py-2"
                   >
-                    <option value="">-- Select an available alternative user --</option>
+                    <option value="">-- Select alternative user --</option>
                     {altUsers.map((u) => (
                       <option key={u.id} value={u.id}>
                         {u.name} ({u.department_name}){u.is_same_dept ? ' (Same Dept)' : ''} - ID: {u.student_id}
                       </option>
                     ))}
                   </select>
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Select an available team member to cover your duties (department colleagues listed first).
-                  </p>
                 </div>
 
                 {/* Reason */}
@@ -712,7 +689,7 @@ export default function LeaveManagement() {
                   <label className="label">Leave Reason <span className="text-rose-400">*</span></label>
                   <textarea
                     rows={3}
-                    placeholder="Provide detailed explanation for your leave application..."
+                    placeholder="Enter leave reason..."
                     value={formData.reason}
                     onChange={(e) => setFormData(f => ({ ...f, reason: e.target.value }))}
                     className="input text-xs py-2 resize-none"
@@ -771,15 +748,10 @@ export default function LeaveManagement() {
           {activeTab === 'review' && canManage && (
             <div className="card space-y-5 p-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
-                <div>
-                  <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                    <UserCheck size={18} className="text-cyan-400" />
-                    Review Leave Requests
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Click any application card below to view that applicant's Leave Summary panel on the right.
-                  </p>
-                </div>
+                <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                  <UserCheck size={18} className="text-cyan-400" />
+                  Review Leave Requests
+                </h3>
 
                 {/* Search & Status Filters */}
                 <div className="flex flex-wrap items-center gap-2">
@@ -816,7 +788,6 @@ export default function LeaveManagement() {
                 <div className="text-center py-12 space-y-2">
                   <CheckCircle2 size={36} className="mx-auto text-slate-600" />
                   <p className="text-sm font-semibold text-slate-400">No applications to review</p>
-                  <p className="text-xs text-slate-500">All caught up! No leave requests match your search or filter.</p>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -846,9 +817,7 @@ export default function LeaveManagement() {
                               <div className="flex items-center gap-2">
                                 <p className="text-xs font-bold text-slate-100">{l.user_name}</p>
                                 {isSelected && (
-                                  <span className="inline-flex items-center gap-1 text-[9px] font-bold text-cyan-300 bg-cyan-500/20 px-2 py-0.2 rounded-full border border-cyan-500/40">
-                                    <Eye size={10} /> Summary Viewing
-                                  </span>
+                                  <Eye size={13} className="text-cyan-400" title="Selected for Summary View" />
                                 )}
                               </div>
                               <p className="text-[11px] text-slate-500">{l.department_name} · ID: {l.user_student_id}</p>
@@ -931,11 +900,11 @@ export default function LeaveManagement() {
                     ? `${selectedReviewLeaveItem.user_name}'s Summary`
                     : 'Leave Summary'}
                 </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {activeTab === 'review' && selectedReviewLeaveItem
-                    ? `${selectedReviewLeaveItem.department_name} · ID: ${selectedReviewLeaveItem.user_student_id}`
-                    : 'Yearly entitlement & usage'}
-                </p>
+                {activeTab === 'review' && selectedReviewLeaveItem && (
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {selectedReviewLeaveItem.department_name} · ID: {selectedReviewLeaveItem.user_student_id}
+                  </p>
+                )}
               </div>
               <span className="badge badge-success text-[11px] font-bold px-2.5 py-0.5">
                 {new Date().getFullYear()}
@@ -972,10 +941,7 @@ export default function LeaveManagement() {
                       <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
                         <Calendar size={16} />
                       </div>
-                      <div>
-                        <p className="text-xs font-medium text-slate-400">Yearly Entitlement</p>
-                        <p className="text-xs text-slate-500">Fixed annual quota</p>
-                      </div>
+                      <p className="text-xs font-medium text-slate-400">Yearly Entitlement</p>
                     </div>
                     <span className="text-sm font-bold text-slate-100">{activeSummary.yearly_entitlement} Days</span>
                   </div>
@@ -986,10 +952,7 @@ export default function LeaveManagement() {
                       <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
                         <CheckCircle2 size={16} />
                       </div>
-                      <div>
-                        <p className="text-xs font-medium text-slate-400">Leave Taken</p>
-                        <p className="text-xs text-slate-500">Total approved leaves</p>
-                      </div>
+                      <p className="text-xs font-medium text-slate-400">Leave Taken</p>
                     </div>
                     <span className="text-sm font-bold text-emerald-400">{activeSummary.leave_taken} Days</span>
                   </div>
@@ -1000,10 +963,7 @@ export default function LeaveManagement() {
                       <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
                         <Clock size={16} />
                       </div>
-                      <div>
-                        <p className="text-xs font-medium text-slate-400">Pending Requests</p>
-                        <p className="text-xs text-slate-500">Awaiting approval</p>
-                      </div>
+                      <p className="text-xs font-medium text-slate-400">Pending Requests</p>
                     </div>
                     <span className="text-sm font-bold text-amber-400">{activeSummary.pending_leave} Days</span>
                   </div>
@@ -1014,10 +974,7 @@ export default function LeaveManagement() {
                       <div className="w-8 h-8 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-300">
                         <Sparkles size={16} />
                       </div>
-                      <div>
-                        <p className="text-xs font-bold text-slate-200">Remaining Balance</p>
-                        <p className="text-[10px] text-slate-400">Available to request</p>
-                      </div>
+                      <p className="text-xs font-bold text-slate-200">Remaining Balance</p>
                     </div>
                     <span className="text-base font-extrabold text-cyan-300">{activeSummary.remaining_leave} Days</span>
                   </div>
@@ -1028,22 +985,10 @@ export default function LeaveManagement() {
                       <div className="w-8 h-8 rounded-lg bg-slate-700/40 border border-slate-600/30 flex items-center justify-center text-slate-400">
                         <CalendarCheck size={16} />
                       </div>
-                      <div>
-                        <p className="text-xs font-medium text-slate-400">Last Leave Date</p>
-                        <p className="text-xs text-slate-500">Latest approved end date</p>
-                      </div>
+                      <p className="text-xs font-medium text-slate-400">Last Leave Date</p>
                     </div>
                     <span className="text-xs font-semibold text-slate-200">{activeSummary.last_leave_date}</span>
                   </div>
-                </div>
-
-                <div className="p-3 rounded-xl bg-slate-800/30 border border-slate-700/30 text-[11px] text-slate-400 flex items-start gap-2">
-                  <Info size={15} className="text-cyan-400 flex-shrink-0 mt-0.5" />
-                  <span>
-                    {activeTab === 'review'
-                      ? `Viewing ${selectedReviewLeaveItem ? selectedReviewLeaveItem.user_name : 'applicant'}'s leave quota. Click any application card on the left to inspect applicant summary.`
-                      : 'Remaining leave automatically updates whenever an application is approved by Admin/HR.'}
-                  </span>
                 </div>
               </>
             )}
