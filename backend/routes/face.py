@@ -677,6 +677,7 @@ def recognize_face():
         if face['matched'] and face.get('recognition_confirmed') and should_mark:
             cache_key = _attendance_cache_key(face['user_id'], session_id)
             if cache_key in _session_marked_cache:
+                # Fully done today (both punch-in and punch-out completed)
                 face_out['attendance_marked'] = False
                 face_out['attendance_status'] = 'already_marked_today'
             else:
@@ -690,15 +691,20 @@ def recognize_face():
                     if att:
                         face_out['in_time'] = att.timestamp.isoformat() if att.timestamp else None
                         face_out['out_time'] = att.punch_out.isoformat() if att.punch_out else None
-                        
-                    if mark_result['marked'] or mark_result['reason'] in ('already_marked_today', 'cooldown'):
+                    
+                    # Only cache as 'done' when punch_out is complete (both IN and OUT done)
+                    if mark_result['marked'] and mark_result.get('punch_type') == 'OUT':
                         _session_marked_cache.add(cache_key)
+                    elif mark_result['reason'] == 'cooldown':
+                        # Don't cache on cooldown — allow retry after cooldown expires
+                        pass
                         
                     logger.info(
                         f'[Attendance] user_id={face["user_id"]} '
                         f'distance={round(face["distance"], 4)} '
                         f'confidence={confidence}% '
-                        f'marked={mark_result["marked"]}'
+                        f'marked={mark_result["marked"]} '
+                        f'punch_type={mark_result.get("punch_type","?")}'
                     )
                 except Exception as mark_err:
                     logger.error(f'[Attendance] mark failed for user_id={face["user_id"]}: {mark_err}')
