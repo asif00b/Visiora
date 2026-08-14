@@ -24,8 +24,8 @@ export function useCamera(cameraIndex = 0) {
     try {
       const constraints = {
         video: deviceId
-          ? { deviceId: { exact: deviceId }, width: { ideal: 960 }, height: { ideal: 540 }, frameRate: { ideal: 24, max: 30 } }
-          : { width: { ideal: 960 }, height: { ideal: 540 }, frameRate: { ideal: 24, max: 30 } }
+          ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } }
+          : { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } }
       }
       const stream = await navigator.mediaDevices.getUserMedia(constraints)
       streamRef.current = stream

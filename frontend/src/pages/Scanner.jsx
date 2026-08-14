@@ -77,8 +77,8 @@ export default function Scanner() {
     }
   }
 
-  const scannerIntervalMs = 150
-  const scannerFrameMaxWidth = 640
+  const scannerIntervalMs = 120
+  const scannerFrameMaxWidth = 720
 
   const THEME = {
     primary: '#00d4ff',
@@ -360,7 +360,7 @@ export default function Scanner() {
     if (!isActive || inFlightRef.current || !scanningRef.current) return
     inFlightRef.current = true
 
-    const frameB64 = captureFrame(scannerFrameMaxWidth)
+    const frameB64 = captureFrame(0.80, 0, scannerFrameMaxWidth)
     if (!frameB64) {
       inFlightRef.current = false
       return
