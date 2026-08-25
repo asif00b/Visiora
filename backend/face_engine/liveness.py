@@ -241,20 +241,20 @@ def evaluate_real_human_liveness(image_rgb: np.ndarray, face_box=None, ear_histo
                 }
 
         # ── Test 3: Screen Bezel & Straight Edge Detection ──
-        if exp_crop.shape[0] > 30 and exp_crop.shape[1] > 30:
+        if exp_crop.shape[0] > 40 and exp_crop.shape[1] > 40:
             gray_exp = cv2.cvtColor(exp_crop, cv2.COLOR_RGB2GRAY)
-            edges = cv2.Canny(gray_exp, 50, 150)
-            lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=45, minLineLength=35, maxLineGap=4)
+            edges = cv2.Canny(gray_exp, 60, 160)
+            lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=45, minLineLength=40, maxLineGap=4)
             
             long_straight_lines = 0
             if lines is not None:
                 for line in lines:
                     lx1, ly1, lx2, ly2 = line[0]
                     ldx, ldy = abs(lx2 - lx1), abs(ly2 - ly1)
-                    if (ldx < 3 and ldy > 30) or (ldy < 3 and ldx > 30):
+                    if (ldx < 3 and ldy > 35) or (ldy < 3 and ldx > 30):
                         long_straight_lines += 1
 
-            if long_straight_lines >= 4:
+            if long_straight_lines >= 6:
                 return {
                     'liveness_passed': False,
                     'is_spoof': True,
@@ -263,20 +263,20 @@ def evaluate_real_human_liveness(image_rgb: np.ndarray, face_box=None, ear_histo
                     'reason': 'Spoof Attack Blocked: Phone hardware bezel / screen edge detected'
                 }
 
-        # ── Test 4: YCrCb Human Skin Spectrum Reflection ──
-        ycrcb = cv2.cvtColor(face_crop, cv2.COLOR_RGB2YCrCb)
-        cr = ycrcb[:, :, 1]
-        cb = ycrcb[:, :, 2]
-        skin_mask = (cr >= 133) & (cr <= 173) & (cb >= 77) & (cb <= 127)
+        # ── Test 4: HSV Human Skin Color Mask ──
+        # HSV skin color bounds: Hue 0-25 or 160-180 (warm skin wavelengths), Saturation 18-230, Value 30-255
+        hsv = cv2.cvtColor(face_crop, cv2.COLOR_RGB2HSV)
+        h_ch, s_ch, v_ch = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+        skin_mask = ((h_ch <= 25) | (h_ch >= 160)) & (s_ch >= 18) & (s_ch <= 230) & (v_ch >= 30)
         skin_pct = float(np.mean(skin_mask) * 100.0)
 
-        if skin_pct < 10.0:
+        if skin_pct < 5.0:
             return {
                 'liveness_passed': False,
                 'is_spoof': True,
                 'liveness_score': round(skin_pct / 100.0, 2),
                 'skin_pct': round(skin_pct, 1),
-                'reason': 'Spoof Attack Blocked: Unnatural skin spectrum (LED backlight screen)'
+                'reason': 'Spoof Attack Blocked: Unnatural color spectrum (LED backlight screen)'
             }
 
         # Real Human Verified!
