@@ -491,11 +491,8 @@ class TrackingPipeline:
                     status = "FACE_ROTATED"
 
                 # Liveness overlay status override
-                if liveness_enabled and not liveness_confirmed:
-                    if len(state.track_ear_history.get(tid, [])) >= 5:
-                        status = "SPOOF_DETECTED"
-                    else:
-                        status = "LIVENESS_CHECK"
+                if is_spoof:
+                    status = "SPOOF_DETECTED"
 
                 status_color = "#f59e0b" if status in ("STABILIZING", "LIVENESS_CHECK") else "#06b6d4"
                 if status == "SPOOF_DETECTED" or (user_id == "Unknown" and cache.get("age", 0) >= self.STABLE_AGE_REQ):
