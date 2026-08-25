@@ -1,0 +1,36 @@
+2026-08-25 13:44:55.095482 - capture_template called
+2026-08-25 13:44:55.095482 - Launching Scanner.exe to D:\NUB\Final Project\Attendence System\Version 6\backend\biometric\_scan_29860.bmp
+2026-08-25 13:44:57.054531 - Scanner.exe finished with returncode=0
+2026-08-25 13:44:57.054531 - Scanner.exe stdout: STATE: WAIT_FINGER
+STATE: CAPTURING
+SUCCESS: D:\NUB\Final Project\Attendence System\Version 6\backend\biometric\_scan_29860.bmp
+2026-08-25 13:44:57.055537 - Scanner.exe stderr: 
+2026-08-25 13:44:57.055537 - Launching Matcher.dll via D:\NUB\Final Project\Attendence System\Version 6\backend\biometric\dotnet\dotnet.exe
+2026-08-25 13:44:57.390008 - Matcher finished with returncode=0
+2026-08-25 13:44:57.391021 - Matcher stdout: p2d2ZXJzaW9ueBpTb3VyY2VBRklTIGZvciAuTkVUIDMuMTQuMGV3aWR0aBkBQGZoZWlnaHQZAeBqcG9zaXRpb25zWJhPGFwYaRhaGEYYQhh0GGEYWhhxGKQYjhiZGLcYrRitGK0YmRiqGLEYyhjiGNoYwhjkGQEDGH4YYBigGMkYrxhSGE8YYBhSGG4YahimGK8YqBi0GMAYyBi8GMkYyxi+GL0Y3hhkGNQYSBhEGEQYShhQGIwYhRh3GLkY0hjiGPoYiRheGG4YkhiOGIoYzhiLGI0Yvxi+GNkY5hkBBBhLGGsYpGpwb3NpdGlvbnNZmE8YtBiiGQEAGQFwGQGIGLwZAUoZAXAZAUoYXBjoGOoYphjiGPoZAQIZAYoZAaAZAYIZASAYwBj4GQGAGQEcGQGOExi/GQEfGK0ZAaEYzhjsGJoZASYYxhkBRhiOGKQYyhjKGNIYyhkBMhj4GQEEGQFGGQFgGO4YlRidGLgY6BkBOBkBTBkBiBh4GQEGGQFyGQEeGMwYtBkBZBkBQRkBGhjqGJIYqhkBUhIZAaAZAawY+BkBQhkBRBkBMhjuGNMZARMZAWlqZGlyZWN0aW9uc5hP+kCFgMb6P+AVS/pAoB+B+kCbj5n6P9XRzPpAdLru+kCpFEr6QLziv/pAHeDm+kCAZl76P8kP2/o/lTxc+j/CqtH6P6ZhePpAdsOE+kBgj6H6QGKRP/pAhi8M+j8AulX6QIP6+fo/JyD1+j7tYzj6QG3zMPo/UooB+kB0Ps/6QDFTLPo/9CgE+j+YW2z6P4iysPo/HFiJ+kCZFAv6P9wervpAgsfr+kAGU+b6P9wervpAg/r5+kCL0df6P8905PpAcj76+kCWy+T6PwpY7/o/EwWk+kBmvEL6P4iysPo/jbcN+j8x2l76QHtT0fo+tLso+j9o5ZX6QGa8QvpAlsvk+kCKnsj6QKL5APpApmCS+kCzrTr6Pr3ld/o/5Q0z+kAzg8b6PzgFPvpAgaSg+j695Xf6QHl/1fo/hQBS+j/JD9v6P+hrUfo/o8Fm+kCSCC/6QID2WvpAP4hx+j+vy5n6QFWx/PpAheXo+kB2AaL6P0kP2/o/QiUL+kCSQXj6P+JUHfo/k4d7+j7YgE9ldHlwZXN4T0VFRUVFRUVCRUJFRUVCQkJFQkVCRUJCQkVCQkJFQkJCRUVCRUVFRUJFRUJCQkJFRUVCQkVCRUVFRUVCRUVCRUVCRUVFQkJFRUJCQkVCRUU=
+2026-08-25 13:44:57.391021 - Matcher stderr: 
+2026-08-25 13:44:57.393011 - Successfully captured template of length 1244
+2026-08-25 13:45:52.681914 - capture_template called
+2026-08-25 13:45:52.681914 - Launching Scanner.exe to D:\NUB\Final Project\Attendence System\Version 6\backend\biometric\_scan_29860.bmp
+2026-08-25 13:45:53.703752 - Scanner.exe finished with returncode=0
+2026-08-25 13:45:53.704782 - Scanner.exe stdout: STATE: WAIT_FINGER
+STATE: CAPTURING
+SUCCESS: D:\NUB\Final Project\Attendence System\Version 6\backend\biometric\_scan_29860.bmp
+2026-08-25 13:45:53.706130 - Scanner.exe stderr: 
+2026-08-25 13:45:53.707162 - Launching Matcher.dll via D:\NUB\Final Project\Attendence System\Version 6\backend\biometric\dotnet\dotnet.exe
+2026-08-25 13:45:54.227807 - Matcher finished with returncode=0
+2026-08-25 13:45:54.228809 - Matcher stdout: p2d2ZXJzaW9ueBpTb3VyY2VBRklTIGZvciAuTkVUIDMuMTQuMGV3aWR0aBkBQGZoZWlnaHQZAeBqcG9zaXRpb25zWJg9GF4YdBh0GE8YaBiCGH4YrRiwGJMYjBjIGMoY6BjmGQEDGQEHGKUY7BhaGHoYmhitGMAYvBi+GMQYxRiyGNMYVRibGL4Y3xhWGGIYnxitGMoYuxjiGPIYvxjlGPkYVxhNGG4YcxiFGHAYgBiOGHQYiBi/GPYZAQQZAQMY/xkBBGpwb3NpdGlvbnNZmD0YQBhUGHQZAS4Y3BiYGNAYchi8GQFOGQGcGLQYsBicGQEAGNYY3hkBdRjHGQEGGGYYthioGGIYehh2GJIY0BkBXhkBFBkBexkBjxkBaRkBTxkBhBkBhBhaGIYYXBj6GQF0GQE0GQFNGLEY4RhYGQEMGIoYsBhcGQFGGQEGGPIZAYYZAY4ZAQAYshi+GQEoGQELGQFhamRpcmVjdGlvbnOYPfpAPG26+kA7yDz6QL5J0PpApuMv+kAPtuL6QLziv/pAsoSj+kA/iHH6QMXfXvpArxve+kDCvsr6QEKu4vkAAPpAVbH8+kBVsfz6QF6b7/pAWL2W+j4gXD76PnrbsPpAqBcC+kAzg8b6QB/gu/pAMLWj+j3MHxT6QIRrL/o+GHab+kBJD9v6QDxtuvpAujmn+kAt/9H6QKwuhPo+GHab+j8cWIn6PxxYifpAGo6M+kCuJzv6QEKu4vpAP4hx+kBMQl/6QMK+yvo/Cljv+j8TjVT6QLuH1vpAUpdE+j7C0bv6QD+IcfpABLaD+kAf4Lv6QBURMPpAxEwm+kCm4y/6QAueEPpAsoSj+kAajoz6QK1XG/pAH+C7+kB49Uj6QFi9lvpAbfMw+j8TjVT6PzRZuWV0eXBlc3g9QkJCRUVCRUVCQkVCQkVFQkJFQkJFQkJCRUVCQkVCRUVCRUVFQkJCQkVFRUJCQkJCQkJFRUVCQkJFQkJFRQ==
+2026-08-25 13:45:54.229809 - Matcher stderr: 
+2026-08-25 13:45:54.231178 - Successfully captured template of length 992
+2026-08-25 14:49:41.051927 - capture_template called
+2026-08-25 14:49:41.052931 - Launching Scanner.exe to D:\NUB\Final Project\Attendence System\Version 6\backend\biometric\_scan_29860.bmp
+2026-08-25 14:49:42.342480 - Scanner.exe finished with returncode=0
+2026-08-25 14:49:42.343463 - Scanner.exe stdout: STATE: WAIT_FINGER
+STATE: CAPTURING
+SUCCESS: D:\NUB\Final Project\Attendence System\Version 6\backend\biometric\_scan_29860.bmp
+2026-08-25 14:49:42.343463 - Scanner.exe stderr: 
+2026-08-25 14:49:42.344467 - Launching Matcher.dll via D:\NUB\Final Project\Attendence System\Version 6\backend\biometric\dotnet\dotnet.exe
+2026-08-25 14:49:42.782531 - Matcher finished with returncode=0
+2026-08-25 14:49:42.782531 - Matcher stdout: p2d2ZXJzaW9ueBpTb3VyY2VBRklTIGZvciAuTkVUIDMuMTQuMGV3aWR0aBkBQGZoZWlnaHQZAeBqcG9zaXRpb25zWJglGDoYVBhdGF4YcRh4GJUYiBjZGMwYzBjtGHEYUxhsGIcYoxi4GNQY2BjIGHUYqBieGMIY2RjiGPoYdBiLGIQY4BjYGPwYWRieGKZqcG9zaXRpb25zWZglGQFgGQEsGQESGQEYGQEqGQFcGPIZAXQY8hkBZBkBnBkBLRiAGQFEGQGiGQGEGQEUGLoZATIZAUoZAU0ZAR4YwBkBpBkBpBkBPhkBfBkBbBkBbhkBABkBPhjeGQGGGQE+GN8YpRkBlWpkaXJlY3Rpb25zmCX6QK/t3/pAxEwm+kAzg8b6QMd2mPpAP4hx+kDETCb6QFKXRPo+2IBP+j5627D6QG3zMPo/E41U+j6sYKT6QFKXRPpAH+C7+j9JD9v6P21jOPpAWL2W+j6sYKT6PkoiEPo/ALpV+j8cWIn6QEkP2/pAUpdE+j8kvH36QHAl/fo+rGCk+j8KWO/6QGk+cPpABLaD+j3MHxT6QDxtuvpAZrxC+j8ZnOT6QGQf5fpAxd9e+j4Ydpv6PyS8fWV0eXBlc3glQkVCQkJCQkJCRUJFRUVFQkJCRUJCQkVFQkJCQkJCQkVCQkJCRQ==
+2026-08-25 14:49:42.783518 - Matcher stderr: 
+2026-08-25 14:49:42.784519 - Successfully captured template of length 672

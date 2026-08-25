@@ -83,9 +83,15 @@ export default function AttendanceTable({ records = [], loading = false }) {
                     {rec.hours_worked ? `${Number(rec.hours_worked).toFixed(1)} hrs` : '0.0 hrs'}
                   </td>
                   <td>
-                    <span className={`badge ${STATUS_COLORS[rec.status] || 'badge-gray'} text-[10px] uppercase font-bold`}>
-                      {rec.status}
-                    </span>
+                    {rec.is_manual || rec.method === 'manual' || rec.status === 'manual' ? (
+                      <span className="badge badge-info text-[10px] flex items-center gap-1 font-bold">
+                        <ShieldCheck size={10} /> Manual Entry
+                      </span>
+                    ) : (
+                      <span className="badge badge-gray text-[10px] flex items-center gap-1 font-bold">
+                        <Clock size={10} /> Live Scanner
+                      </span>
+                    )}
                   </td>
                   <td>
                     {rec.status === 'late' ? (
@@ -98,7 +104,7 @@ export default function AttendanceTable({ records = [], loading = false }) {
                       </span>
                     ) : rec.status === 'manual' ? (
                       <span className="badge badge-info text-[10px] flex items-center gap-1 font-bold">
-                        <ShieldCheck size={10} /> Manual Entry
+                        <ShieldCheck size={10} /> Manual Punch
                       </span>
                     ) : (
                       <span className="badge badge-error text-[10px] flex items-center gap-1 font-bold">
@@ -106,7 +112,10 @@ export default function AttendanceTable({ records = [], loading = false }) {
                       </span>
                     )}
                   </td>
-                  <td className="text-slate-400 text-xs">{rec.marked_by || 'System'}</td>
+                  <td className="text-slate-400 text-xs">
+                    <div>{rec.marked_by_name || rec.marked_by || 'System'}</div>
+                    {rec.note && <div className="text-[10px] text-slate-500 max-w-[150px] truncate" title={rec.note}>{rec.note}</div>}
+                  </td>
                 </tr>
               )
             })}

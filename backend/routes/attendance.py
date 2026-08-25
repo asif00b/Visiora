@@ -15,40 +15,129 @@ attendance_bp = Blueprint('attendance', __name__)
 logger        = logging.getLogger(__name__)
 
 
-@attendance_bp.route('/attendance/mark', methods=['POST'])
+@attendance_bp.route('/attendance/manual', methods=['POST'])
 @jwt_required()
-@require_role('admin', 'hr')
-def mark_attendance():
-    """Manually mark attendance for a user."""
+@require_auth
+def manual_attendance():
+    """
+    Manually add or update attendance for a user (e.g. for forgotten scans).
+    Allows selecting user, date, check-in, check-out, session, status, and manual reason.
+    Records that the attendance was manually added by a user/admin.
+    """
     try:
-        data       = request.get_json() or {}
-        user_id    = data.get('user_id')
+        current = get_current_user()
+        data = request.get_json() or {}
+
+        user_id = data.get('user_id')
+        attendance_date_str = data.get('attendance_date')
         session_id = data.get('session_id')
+        status = data.get('status', 'present')
+        check_in_str = data.get('check_in_time')
+        check_out_str = data.get('check_out_time')
+        reason = (data.get('reason') or data.get('note') or 'Manual entry (Forgot to scan)').strip()
 
         if not user_id:
-            return jsonify({'success': False, 'message': 'user_id required'}), 400
+            return jsonify({'success': False, 'message': 'User is required'}), 400
 
-        User.query.get_or_404(user_id)
-        current = get_current_user()
+        target_user = User.query.get_or_404(int(user_id))
 
-        result = mark_attendance_once(
-            user_id=user_id,
-            session_id=session_id,
-            status=data.get('status', 'manual'),
-            marked_by_id=current.id,
-            note=data.get('note'),
-        )
-        record = result.get('attendance')
+        if not attendance_date_str:
+            attendance_date = datetime.now().date()
+        else:
+            try:
+                attendance_date = datetime.strptime(attendance_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify({'success': False, 'message': 'attendance_date must be in YYYY-MM-DD format'}), 400
+
+        parsed_session_id = None
+        if session_id and str(session_id).strip() not in ('', '0', 'null', 'None'):
+            parsed_session_id = int(session_id)
+
+        # Parse check-in and check-out timestamps
+        check_in_dt = None
+        if check_in_str:
+            try:
+                time_parts = [int(p) for p in str(check_in_str).split(':')]
+                check_in_dt = datetime.combine(attendance_date, datetime.min.time()).replace(
+                    hour=time_parts[0], minute=time_parts[1], second=time_parts[2] if len(time_parts) > 2 else 0
+                )
+            except Exception:
+                return jsonify({'success': False, 'message': 'Invalid check_in_time format. Use HH:MM or HH:MM:SS'}), 400
+        else:
+            check_in_dt = datetime.combine(attendance_date, datetime.now().time())
+
+        check_out_dt = None
+        if check_out_str:
+            try:
+                time_parts = [int(p) for p in str(check_out_str).split(':')]
+                check_out_dt = datetime.combine(attendance_date, datetime.min.time()).replace(
+                    hour=time_parts[0], minute=time_parts[1], second=time_parts[2] if len(time_parts) > 2 else 0
+                )
+            except Exception:
+                return jsonify({'success': False, 'message': 'Invalid check_out_time format. Use HH:MM or HH:MM:SS'}), 400
+
+        hours_worked = 0.0
+        if check_in_dt and check_out_dt:
+            if check_out_dt < check_in_dt:
+                return jsonify({'success': False, 'message': 'Check-out time cannot be earlier than check-in time'}), 400
+            hours_worked = round((check_out_dt - check_in_dt).total_seconds() / 3600.0, 2)
+
+        # Check existing record for user on this date & session
+        if parsed_session_id is None:
+            existing = Attendance.query.filter(
+                Attendance.user_id == target_user.id,
+                Attendance.attendance_date == attendance_date,
+                Attendance.session_id.is_(None)
+            ).first()
+        else:
+            existing = Attendance.query.filter(
+                Attendance.user_id == target_user.id,
+                Attendance.attendance_date == attendance_date,
+                Attendance.session_id == parsed_session_id
+            ).first()
+
+        full_note = f"[Manual entry by {current.name}] {reason}"
+
+        if existing:
+            existing.status = status
+            existing.method = 'manual'
+            existing.marked_by_id = current.id
+            existing.timestamp = check_in_dt
+            if check_out_dt:
+                existing.punch_out = check_out_dt
+                existing.hours_worked = hours_worked
+            existing.note = full_note
+            db.session.commit()
+            record = existing
+            msg = f"Manual attendance updated for {target_user.name}"
+        else:
+            record = Attendance(
+                user_id=target_user.id,
+                session_id=parsed_session_id,
+                attendance_date=attendance_date,
+                timestamp=check_in_dt,
+                punch_out=check_out_dt,
+                hours_worked=hours_worked,
+                status=status,
+                method='manual',
+                marked_by_id=current.id,
+                note=full_note
+            )
+            db.session.add(record)
+            db.session.commit()
+            msg = f"Manual attendance recorded for {target_user.name}"
+
+        logger.info(f"[Attendance] Manual entry by {current.name} (id={current.id}) for {target_user.name} (id={target_user.id}) on {attendance_date}")
+
         return jsonify({
             'success': True,
-            'marked': result['marked'],
-            'reason': result['reason'],
-            'attendance': record.safe_to_dict() if record else None,
-        }), 201 if result['marked'] else 200
+            'message': msg,
+            'attendance': record.to_dict()
+        }), 201
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f'[Attendance] Mark error: {e}')
+        logger.error(f'[Attendance] Manual entry error: {e}')
         return jsonify({'success': False, 'message': str(e)}), 500
 
 

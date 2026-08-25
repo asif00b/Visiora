@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
-import { getAttendance, exportCSV } from '../../api/attendance'
+import { getAttendance, exportCSV, postManualAttendance } from '../../api/attendance'
 import { getDepartments } from '../../api/departments'
 import { getUsers } from '../../api/users'
 import AttendanceTable from '../../components/AttendanceTable'
@@ -8,7 +8,7 @@ import { ToastContainer, useToast } from '../../components/Toast'
 import { format, subDays, startOfWeek, startOfMonth } from 'date-fns'
 import {
   Download, Filter, RotateCcw, Printer, Calendar, Clock,
-  CheckCircle2, AlertTriangle, Users, Award, FileSpreadsheet
+  CheckCircle2, AlertTriangle, Users, Award, FileSpreadsheet, PlusCircle, X
 } from 'lucide-react'
 
 export default function AttendanceReport() {
@@ -19,6 +19,18 @@ export default function AttendanceReport() {
   const [loading, setLoading]           = useState(false)
   const [filters, setFilters]           = useState({
     user_id: '', dept_id: '', date_from: '', date_to: '', status: ''
+  })
+
+  // Manual Attendance Modal State
+  const [showManualModal, setShowManualModal] = useState(false)
+  const [savingManual, setSavingManual]     = useState(false)
+  const [manualForm, setManualForm]         = useState({
+    user_id: '',
+    attendance_date: format(new Date(), 'yyyy-MM-dd'),
+    status: 'present',
+    check_in_time: '09:00',
+    check_out_time: '17:00',
+    reason: 'Forgot to scan at entrance'
   })
 
   useEffect(() => {
@@ -42,6 +54,34 @@ export default function AttendanceReport() {
       toast.error('Failed to load attendance records')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleSubmitManual = async (e) => {
+    e.preventDefault()
+    if (!manualForm.user_id) {
+      toast.error('Please select an employee / user')
+      return
+    }
+    if (!manualForm.reason.trim()) {
+      toast.error('Please provide a manual entry reason / note')
+      return
+    }
+
+    setSavingManual(true)
+    try {
+      const res = await postManualAttendance(manualForm)
+      if (res.data.success) {
+        toast.success(res.data.message || 'Manual attendance recorded successfully!')
+        setShowManualModal(false)
+        handleLoad()
+      } else {
+        toast.error(res.data.message || 'Failed to record manual attendance')
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to record manual attendance')
+    } finally {
+      setSavingManual(false)
     }
   }
 
@@ -115,6 +155,9 @@ export default function AttendanceReport() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2.5">
+          <button onClick={() => setShowManualModal(true)} className="btn-primary">
+            <PlusCircle size={15} /> Add Manual Attendance
+          </button>
           <button onClick={handlePrint} className="btn-secondary">
             <Printer size={15} /> Print / Save PDF
           </button>
@@ -239,6 +282,130 @@ export default function AttendanceReport() {
 
       {/* Table */}
       <AttendanceTable records={records} loading={loading} />
+
+      {/* Manual Attendance Modal */}
+      {showManualModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+          <div className="card max-w-lg w-full p-6 bg-slate-900 border-slate-700 shadow-2xl relative space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-slate-100 font-semibold text-base">
+                <PlusCircle className="text-cyan-400" size={18} /> Add Manual Attendance Record
+              </div>
+              <button
+                onClick={() => setShowManualModal(false)}
+                className="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitManual} className="space-y-4">
+              <div>
+                <label className="label">Employee / User <span className="text-rose-400">*</span></label>
+                <select
+                  value={manualForm.user_id}
+                  onChange={e => setManualForm({ ...manualForm, user_id: e.target.value })}
+                  className="select"
+                  required
+                >
+                  <option value="">-- Select Employee --</option>
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} ({u.student_id || `ID: ${u.id}`}) — {u.dept_name || 'General'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Attendance Date <span className="text-rose-400">*</span></label>
+                  <input
+                    type="date"
+                    value={manualForm.attendance_date}
+                    onChange={e => setManualForm({ ...manualForm, attendance_date: e.target.value })}
+                    className="input"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="label">Attendance Status</label>
+                  <select
+                    value={manualForm.status}
+                    onChange={e => setManualForm({ ...manualForm, status: e.target.value })}
+                    className="select"
+                  >
+                    <option value="present">Present (On-Time)</option>
+                    <option value="late">Late Arrival</option>
+                    <option value="manual">Manual Entry</option>
+                    <option value="absent">Absent</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Check-In Time</label>
+                  <input
+                    type="time"
+                    value={manualForm.check_in_time}
+                    onChange={e => setManualForm({ ...manualForm, check_in_time: e.target.value })}
+                    className="input"
+                  />
+                </div>
+                <div>
+                  <label className="label">Check-Out Time</label>
+                  <input
+                    type="time"
+                    value={manualForm.check_out_time}
+                    onChange={e => setManualForm({ ...manualForm, check_out_time: e.target.value })}
+                    className="input"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="label">Reason / Note <span className="text-rose-400">*</span></label>
+                <input
+                  type="text"
+                  placeholder="e.g. Forgot to scan at entrance, Hardware scanner offline..."
+                  value={manualForm.reason}
+                  onChange={e => setManualForm({ ...manualForm, reason: e.target.value })}
+                  className="input"
+                  required
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowManualModal(false)}
+                  className="btn-secondary"
+                  disabled={savingManual}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary flex items-center gap-2"
+                  disabled={savingManual}
+                >
+                  {savingManual ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <PlusCircle size={15} /> Save Manual Attendance
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

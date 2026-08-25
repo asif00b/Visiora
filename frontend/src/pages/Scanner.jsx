@@ -314,12 +314,14 @@ export default function Scanner() {
       ctx.fillText(face.name, cardX + 14, cardY + 24)
 
       ctx.font = '11px system-ui, -apple-system, sans-serif'
-      const emotion = estimateEmotion(face.landmarks)
-      const statusText = face.matched
+      const isSpoof = face.is_spoof || face.liveness_passed === false
+      const statusText = isSpoof
+        ? '⚠️ SPOOF ATTACK / PHOTO DETECTED'
+        : face.matched
         ? (face.attendance_status === 'already_marked_today' ? 'ALREADY PUNCHED' : 'VERIFIED')
         : 'UNMATCHED'
-      const statusColor = face.matched ? THEME.accent : THEME.danger
-      
+      const statusColor = isSpoof ? THEME.danger : face.matched ? THEME.accent : THEME.danger
+
       ctx.fillStyle = statusColor
       ctx.fillText(statusText, cardX + 14, cardY + 40)
 

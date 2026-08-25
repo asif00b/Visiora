@@ -135,6 +135,24 @@ def register_face():
             'details': [],
         }), 400
 
+    # ── Step 1.4: Duplicate Face Prevention Check ──
+    if candidates and engine.cache_size() > 0:
+        register_tolerance = float(SystemConfig.get('arcface_tolerance', '0.45'))
+        for cand in candidates[:3]:
+            matches = engine.find_matches(cand['encoding'], tolerance=register_tolerance, top_k=3)
+            for m in matches:
+                matched_user_id = m.get('user_id')
+                if matched_user_id and str(matched_user_id) != 'Unknown' and int(matched_user_id) != user.id:
+                    existing_m_user = User.query.get(int(matched_user_id))
+                    if existing_m_user:
+                        logger.warning(f"[Register] Duplicate face blocked: candidate matches existing user {existing_m_user.name} (id={existing_m_user.id})")
+                        return jsonify({
+                            'success': False,
+                            'already_registered': True,
+                            'existing_user': existing_m_user.to_dict(),
+                            'message': f'Already Registered: Face matches existing user "{existing_m_user.name}" (ID: {existing_m_user.student_id or existing_m_user.id}, Email: {existing_m_user.email}). Duplicate account registration is prohibited.'
+                        }), 409
+
     # ── Step 1.5: Enforce Liveness Check (EAR Variance) ──
     liveness_enabled = SystemConfig.get('liveness_enabled', 'false').lower() == 'true'
     if liveness_enabled and len(candidates) >= 2:
@@ -649,15 +667,37 @@ def recognize_face():
 
     output = []
 
+    from face_engine.liveness import evaluate_real_human_liveness
+    image_rgb_decoded = engine.decode_image(image_data) if hasattr(engine, 'decode_image') else None
+
     for face in results:
         confidence       = round((1 - face['distance']) * 100, 1)
         confidence_label = ('High' if confidence >= 85 else 'Medium' if confidence >= 65 else 'Low')
+
+        # Real Human Liveness & Anti-Spoofing Check
+        face_location_box = face.get('location')
+        if not face_location_box and face.get('box'):
+            b = face['box']
+            if image_rgb_decoded is not None:
+                h, w = image_rgb_decoded.shape[:2]
+                face_location_box = [b['top'] * h, b['right'] * w, b['bottom'] * h, b['left'] * w]
+
+        liveness_res = evaluate_real_human_liveness(image_rgb_decoded, face_location_box)
+
+        # If spoofing / photo / screen display is detected, block matching and attendance
+        if liveness_res.get('is_spoof') or not liveness_res.get('liveness_passed'):
+            face['matched'] = False
+            face['recognition_confirmed'] = False
 
         face_out = {
             **face,
             'confidence':        confidence,
             'confidence_label':  confidence_label,
             'attendance_marked': False,
+            'liveness_passed':   liveness_res.get('liveness_passed', True),
+            'is_spoof':          liveness_res.get('is_spoof', False),
+            'liveness_score':    liveness_res.get('liveness_score', 1.0),
+            'liveness_reason':   liveness_res.get('reason', 'Real human verified'),
         }
 
         # Fetch additional user details (student_id, photo)

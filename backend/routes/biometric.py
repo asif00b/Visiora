@@ -94,6 +94,22 @@ def enroll_fingerprint():
         if not template_b64:
             return jsonify({'success': False, 'message': 'Enrollment failed or timed out. Please try again.'}), 400
 
+        # Duplicate Fingerprint Check against existing users
+        all_existing_fps = UserFingerprint.query.all()
+        if all_existing_fps:
+            records = [{"userId": fp.user_id, "templateB64": fp.template_b64} for fp in all_existing_fps]
+            matched_existing_uid = verify_fingerprint_native(records)
+            if matched_existing_uid and int(matched_existing_uid) != user.id:
+                existing_fp_user = User.query.get(int(matched_existing_uid))
+                if existing_fp_user:
+                    logger.warning(f"[Biometric] Duplicate fingerprint blocked: template matches existing user {existing_fp_user.name} (id={existing_fp_user.id})")
+                    return jsonify({
+                        'success': False,
+                        'already_registered': True,
+                        'existing_user': existing_fp_user.to_dict(),
+                        'message': f'Already Registered: Fingerprint matches existing user "{existing_fp_user.name}" (ID: {existing_fp_user.student_id or existing_fp_user.id}, Email: {existing_fp_user.email}). Duplicate biometric registration is prohibited.'
+                    }), 409
+
         # Ensure table exists in database
         try:
             db.create_all()

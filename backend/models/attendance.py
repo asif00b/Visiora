@@ -42,6 +42,7 @@ class Attendance(db.Model):
     )
     timestamp = db.Column(db.DateTime, default=datetime.now, nullable=False)
     status = db.Column(db.String(20), default="present")
+    method = db.Column(db.String(30), default="scanner", server_default=text("'scanner'"))
     marked_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     note = db.Column(db.String(300), nullable=True)
     punch_out = db.Column(db.DateTime, nullable=True)
@@ -83,7 +84,11 @@ class Attendance(db.Model):
             else None,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "status": self.status,
+            "method": self.method or ("manual" if self.status == "manual" or self.marked_by_id else "scanner"),
+            "is_manual": (self.method == "manual" or self.status == "manual" or self.marked_by_id is not None),
+            "marked_by_id": self.marked_by_id,
             "marked_by": self.marked_by.name if self.marked_by else "System",
+            "marked_by_name": self.marked_by.name if self.marked_by else "System",
             "note": self.note,
             "punch_out": self.punch_out.isoformat() if self.punch_out else None,
             "hours_worked": self.hours_worked or 0.0,

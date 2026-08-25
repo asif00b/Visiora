@@ -83,8 +83,35 @@ def create_user():
     if current.role == 'hr' and role == 'admin':
         return jsonify({'success': False, 'message': 'HR cannot create admin accounts'}), 403
 
-    if User.query.filter_by(email=data['email'].lower()).first():
-        return jsonify({'success': False, 'message': 'Email already exists'}), 409
+    # Duplicate Unique Identifier Checks
+    email_clean = data['email'].lower().strip()
+    existing_email = User.query.filter(db.func.lower(User.email) == email_clean).first()
+    if existing_email:
+        return jsonify({
+            'success': False,
+            'already_registered': True,
+            'message': f'Already Registered: Email "{email_clean}" is registered to existing user {existing_email.name} (ID: {existing_email.student_id or existing_email.id}).'
+        }), 409
+
+    sid_clean = data.get('student_id', '').strip() if data.get('student_id') else None
+    if sid_clean:
+        existing_sid = User.query.filter_by(student_id=sid_clean).first()
+        if existing_sid:
+            return jsonify({
+                'success': False,
+                'already_registered': True,
+                'message': f'Already Registered: Employee/Student ID "{sid_clean}" is registered to existing user {existing_sid.name} (Email: {existing_sid.email}).'
+            }), 409
+
+    phone_clean = data.get('phone', '').strip() if data.get('phone') else None
+    if phone_clean:
+        existing_phone = User.query.filter_by(phone=phone_clean).first()
+        if existing_phone:
+            return jsonify({
+                'success': False,
+                'already_registered': True,
+                'message': f'Already Registered: Phone number "{phone_clean}" is registered to existing user {existing_phone.name} (ID: {existing_phone.student_id or existing_phone.id}).'
+            }), 409
 
     pw_hash = bcrypt.hashpw(data['password'].encode(), bcrypt.gensalt()).decode()
     try:
@@ -246,23 +273,48 @@ def update_user(uid):
     if 'name' in data:
         user.name = data['name']
     if 'email' in data:
-        existing = User.query.filter_by(email=data['email'].lower()).first()
-        if existing and existing.id != uid:
-            return jsonify({'success': False, 'message': 'Email already in use'}), 409
-        user.email = data['email'].lower().strip()
+        email_clean = data['email'].lower().strip()
+        existing_email = User.query.filter(db.func.lower(User.email) == email_clean).first()
+        if existing_email and existing_email.id != uid:
+            return jsonify({
+                'success': False,
+                'already_registered': True,
+                'message': f'Already Registered: Email "{email_clean}" is registered to existing user {existing_email.name} (ID: {existing_email.student_id or existing_email.id}).'
+            }), 409
+        user.email = email_clean
+
     if 'phone' in data:
         phone = data['phone']
-        if phone:
+        if phone and str(phone).strip():
             import re
-            if not re.match(r'^01\d{9}$', str(phone)):
+            phone_clean = str(phone).strip()
+            if not re.match(r'^01\d{9}$', phone_clean):
                 return jsonify({'success': False, 'message': 'Phone must be an 11-digit Bangladeshi number starting with 01'}), 400
-            user.phone = phone
+            existing_phone = User.query.filter_by(phone=phone_clean).first()
+            if existing_phone and existing_phone.id != uid:
+                return jsonify({
+                    'success': False,
+                    'already_registered': True,
+                    'message': f'Already Registered: Phone number "{phone_clean}" is registered to existing user {existing_phone.name} (ID: {existing_phone.student_id or existing_phone.id}).'
+                }), 409
+            user.phone = phone_clean
         else:
             user.phone = None
-    if 'dept_id' in data:
-        user.dept_id = data['dept_id'] if data['dept_id'] != '' else None
+
     if 'student_id' in data:
-        user.student_id = data['student_id'] or None
+        sid = data['student_id']
+        if sid and str(sid).strip():
+            sid_clean = str(sid).strip()
+            existing_sid = User.query.filter_by(student_id=sid_clean).first()
+            if existing_sid and existing_sid.id != uid:
+                return jsonify({
+                    'success': False,
+                    'already_registered': True,
+                    'message': f'Already Registered: Employee/Student ID "{sid_clean}" is registered to existing user {existing_sid.name} (Email: {existing_sid.email}).'
+                }), 409
+            user.student_id = sid_clean
+        else:
+            user.student_id = None
     if 'weekly_target_hours' in data:
         try:
             user.weekly_target_hours = float(data['weekly_target_hours']) if data['weekly_target_hours'] != '' else 40.0
