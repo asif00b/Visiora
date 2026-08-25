@@ -96,23 +96,33 @@ class TrackingPipeline:
     def _calculate_ear(self, state, track_id, box, frame_rgb):
         tx, ty, tx2, ty2 = box
         try:
-            from face_engine.liveness import get_eye_aspect_ratio_from_image
+            from face_engine.liveness import get_eye_aspect_ratio_from_image, evaluate_real_human_liveness
             top_b, right_b, bottom_b, left_b = ty, tx2, ty2, tx
             ear = get_eye_aspect_ratio_from_image(frame_rgb, (top_b, right_b, bottom_b, left_b))
+            
+            ear_history = state.track_ear_history.setdefault(track_id, [])
             if ear is not None:
-                ear_history = state.track_ear_history.setdefault(track_id, [])
                 ear_history.append(ear)
                 if len(ear_history) > 15:
                     ear_history.pop(0)
-                
-                if len(ear_history) >= 5:
-                    ear_var = float(np.var(ear_history))
-                    if ear_var < 0.00004:
-                        state.track_liveness_confirmed[track_id] = False
-                    else:
-                        state.track_liveness_confirmed[track_id] = True
+
+            # Multi-spectrum anti-spoofing check for this track
+            liveness_res = evaluate_real_human_liveness(frame_rgb, (top_b, right_b, bottom_b, left_b), ear_history=ear_history)
+
+            cache = state.track_cache.setdefault(track_id, {})
+            if liveness_res.get('is_spoof') or not liveness_res.get('liveness_passed'):
+                state.track_liveness_confirmed[track_id] = False
+                cache['is_spoof'] = True
+                cache['liveness_reason'] = liveness_res.get('reason', 'Spoof Detected')
+                cache['user_id'] = "Unknown"
+                cache['recognition_confirmed'] = False
+            else:
+                state.track_liveness_confirmed[track_id] = True
+                cache['is_spoof'] = False
+                cache['liveness_reason'] = 'Real human verified'
+
         except Exception as exc:
-            logger.debug("[Tracker] EAR check failed: %s", exc)
+            logger.debug("[Tracker] Liveness check failed: %s", exc)
 
     def _process_iou_tracking(self, state, frame_rgb, detector_func, current_faces, liveness_enabled=False):
         try:
@@ -380,6 +390,17 @@ class TrackingPipeline:
         for tid, cache in list(state.track_cache.items()):
             cache["age"] = cache.get("age", 0) + 1
             cache["frames_since_rec"] = cache.get("frames_since_rec", 0) + 1
+
+            # Exclude spoof / fake faces from recognition batch
+            liveness_confirmed = state.track_liveness_confirmed.get(tid, True)
+            is_spoof = cache.get("is_spoof", False) or not liveness_confirmed
+
+            if is_spoof:
+                cache["user_id"] = "Unknown"
+                cache["recognition_confirmed"] = False
+                cache["name"] = "Unknown"
+                continue
+
             if (
                 cache["age"] >= self.STABLE_AGE_REQ
                 and cache["frames_since_rec"] >= self.REC_REFRESH_INTERVAL
@@ -425,7 +446,7 @@ class TrackingPipeline:
                 }
             )
 
-    def _package_results(self, state, current_faces, w, h, liveness_enabled=False):
+    def _package_results(self, state, current_faces, w, h, liveness_enabled=True):
         results = []
         for tid, (bbox, kps) in current_faces.items():
             cache = state.track_cache.get(tid)
@@ -433,20 +454,22 @@ class TrackingPipeline:
                 continue
 
             x1, y1, x2, y2 = bbox
-            user_id = cache.get("user_id")
-            matched = user_id is not None and user_id != "Unknown"
+            is_spoof = cache.get("is_spoof", False) or (state.track_liveness_confirmed.get(tid) is False)
             
-            # Restrict recognition confirmation if liveness is required but not confirmed
-            liveness_confirmed = state.track_liveness_confirmed.get(tid, True) if liveness_enabled else True
-            rec_confirmed = cache.get("recognition_confirmed", False) and liveness_confirmed
+            user_id = cache.get("user_id") if not is_spoof else "Unknown"
+            matched = (user_id is not None and user_id != "Unknown") if not is_spoof else False
+            rec_confirmed = cache.get("recognition_confirmed", False) if not is_spoof else False
 
             res = {
                 "box": {"left": x1 / w, "top": y1 / h, "right": x2 / w, "bottom": y2 / h},
                 "location": [int(y1), int(x2), int(y2), int(x1)],
                 "matched": matched,
                 "recognition_confirmed": rec_confirmed,
+                "is_spoof": is_spoof,
+                "liveness_passed": not is_spoof,
+                "liveness_reason": cache.get("liveness_reason", "Spoof Attack Blocked" if is_spoof else "Real human verified"),
                 "user_id": user_id,
-                "name": cache.get("name", "Unknown"),
+                "name": cache.get("name", "Unknown") if not is_spoof else "Unknown",
                 "distance": cache.get("distance", 1.0),
                 "track_id": tid,
             }

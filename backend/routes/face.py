@@ -670,6 +670,10 @@ def recognize_face():
     from face_engine.liveness import evaluate_real_human_liveness
     image_rgb_decoded = engine.decode_image(image_data) if hasattr(engine, 'decode_image') else None
 
+    # Step 1: Per-Face Liveness Evaluation & Filtering
+    evaluated_faces = []
+    seen_matched_user_ids = set()
+
     for face in results:
         confidence       = round((1 - face['distance']) * 100, 1)
         confidence_label = ('High' if confidence >= 85 else 'Medium' if confidence >= 65 else 'Low')
@@ -683,28 +687,47 @@ def recognize_face():
                 face_location_box = [b['top'] * h, b['right'] * w, b['bottom'] * h, b['left'] * w]
 
         liveness_res = evaluate_real_human_liveness(image_rgb_decoded, face_location_box)
+        is_spoof = face.get('is_spoof', False) or liveness_res.get('is_spoof', False) or (not liveness_res.get('liveness_passed', True))
 
         # If spoofing / photo / screen display is detected, block matching and attendance
-        if liveness_res.get('is_spoof') or not liveness_res.get('liveness_passed'):
-            face['matched'] = False
-            face['recognition_confirmed'] = False
+        if is_spoof:
+            matched = False
+            rec_confirmed = False
+            user_id = 'Unknown'
+            user_name = 'Unknown'
+        else:
+            user_id = face.get('user_id', 'Unknown')
+            matched = face.get('matched', False) and user_id != 'Unknown'
+            rec_confirmed = face.get('recognition_confirmed', False) and matched
+            user_name = face.get('name', 'Unknown')
+
+            # Deduplicate: Only allow primary live face per user per frame
+            if matched and rec_confirmed:
+                if user_id in seen_matched_user_ids:
+                    rec_confirmed = False
+                else:
+                    seen_matched_user_ids.add(user_id)
 
         face_out = {
             **face,
+            'user_id':           user_id,
+            'name':              user_name,
+            'matched':           matched,
+            'recognition_confirmed': rec_confirmed,
             'confidence':        confidence,
             'confidence_label':  confidence_label,
             'attendance_marked': False,
-            'liveness_passed':   liveness_res.get('liveness_passed', True),
-            'is_spoof':          liveness_res.get('is_spoof', False),
-            'liveness_score':    liveness_res.get('liveness_score', 1.0),
-            'liveness_reason':   liveness_res.get('reason', 'Real human verified'),
+            'liveness_passed':   not is_spoof,
+            'is_spoof':          is_spoof,
+            'liveness_score':    liveness_res.get('liveness_score', 0.1 if is_spoof else 0.95),
+            'liveness_reason':   liveness_res.get('reason', 'Spoof Attack Blocked' if is_spoof else 'Real human verified'),
         }
 
         # Fetch additional user details (student_id, photo)
-        if face.get('user_id') and str(face['user_id']) != 'Unknown':
+        if matched and user_id != 'Unknown':
             from models.user import User
             try:
-                u = User.query.get(int(face['user_id']))
+                u = User.query.get(int(user_id))
                 if u:
                     face_out['student_id'] = u.student_id
                     face_out['photo_url'] = u.image_path
@@ -714,15 +737,14 @@ def recognize_face():
 
         face_encoding = face_out.pop('_embedding', None)
 
-        if face['matched'] and face.get('recognition_confirmed') and should_mark:
-            cache_key = _attendance_cache_key(face['user_id'], session_id)
+        if matched and rec_confirmed and should_mark:
+            cache_key = _attendance_cache_key(user_id, session_id)
             if cache_key in _session_marked_cache:
-                # Fully done today (both punch-in and punch-out completed)
                 face_out['attendance_marked'] = False
                 face_out['attendance_status'] = 'already_marked_today'
             else:
                 try:
-                    mark_result = mark_attendance_once(face['user_id'], session_id)
+                    mark_result = mark_attendance_once(user_id, session_id)
                     face_out['attendance_marked'] = mark_result['marked']
                     face_out['attendance_status'] = mark_result['reason']
                     face_out['punch_type'] = mark_result.get('punch_type', 'IN')
@@ -732,24 +754,20 @@ def recognize_face():
                         face_out['in_time'] = att.timestamp.isoformat() if att.timestamp else None
                         face_out['out_time'] = att.punch_out.isoformat() if att.punch_out else None
                     
-                    # Only cache as 'done' when punch_out is complete (both IN and OUT done)
                     if mark_result['marked'] and mark_result.get('punch_type') == 'OUT':
                         _session_marked_cache.add(cache_key)
-                    elif mark_result['reason'] == 'cooldown':
-                        # Don't cache on cooldown — allow retry after cooldown expires
-                        pass
                         
                     logger.info(
-                        f'[Attendance] user_id={face["user_id"]} '
+                        f'[Attendance] user_id={user_id} '
                         f'distance={round(face["distance"], 4)} '
                         f'confidence={confidence}% '
                         f'marked={mark_result["marked"]} '
                         f'punch_type={mark_result.get("punch_type","?")}'
                     )
                 except Exception as mark_err:
-                    logger.error(f'[Attendance] mark failed for user_id={face["user_id"]}: {mark_err}')
+                    logger.error(f'[Attendance] mark failed for user_id={user_id}: {mark_err}')
                     face_out['attendance_marked'] = False
-        elif not face['matched'] and face_encoding is not None and save_unknown:
+        elif not matched and not is_spoof and face_encoding is not None and save_unknown:
             _save_unknown_face(image_data, engine, face['distance'], face_encoding)
 
         output.append(face_out)

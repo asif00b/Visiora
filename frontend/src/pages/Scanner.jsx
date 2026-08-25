@@ -383,13 +383,7 @@ export default function Scanner() {
 
       latestFacesRef.current = processed
       scanCount.current += 1
-
-      if (processed.length > 0) {
-        lastMotionRef.current = Date.now()
-        setIsSleeping(false)
-      } else if (Date.now() - lastMotionRef.current > 7000) {
-        setIsSleeping(true)
-      }
+      setIsSleeping(false)
 
       const newMarks = processed.filter(f => f.attendance_marked).length
       if (newMarks > 0) {

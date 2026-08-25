@@ -163,11 +163,10 @@ def evaluate_real_human_liveness(image_rgb: np.ndarray, face_box=None, ear_histo
     """
     Evaluates whether a detected face image is a real, live human or a photo/screen spoof.
     Performs multi-layer anti-spoofing checks:
-      1. Static EAR Eye Aspect Ratio Variance (Catches frozen eyes on static photos)
+      1. Static EAR Eye Aspect Ratio Variance (Catches frozen eyes on static photos across stream)
       2. Specular Glare & Phone Glass Reflection Analysis
-      3. 3D Surface Shading Gradient Contrast (Differentiates 3D real face from flat 2D screen)
-      4. Screen Bezel & Straight Edge Detection (Hough line transform)
-      5. Skin Color Spectrum Distribution (YCrCb color space LED backlight reflection)
+      3. Phone Bezel & Straight Edge Detection (Hough line transform on expanded ROI)
+      4. Skin Color Spectrum Distribution (YCrCb color space LED backlight reflection)
     Returns:
       {
         'liveness_passed': bool,
@@ -177,137 +176,118 @@ def evaluate_real_human_liveness(image_rgb: np.ndarray, face_box=None, ear_histo
       }
     """
     import cv2
+    import numpy as np
+
     if image_rgb is None or image_rgb.size == 0:
         return {'liveness_passed': False, 'is_spoof': True, 'liveness_score': 0.0, 'reason': 'Invalid image'}
 
     try:
         h, w = image_rgb.shape[:2]
         
-        # Crop face region if bounding box provided
-        if face_box:
-            try:
-                top, right, bottom, left = [int(v) for v in face_box]
-                top_crop = max(0, top - int((bottom - top) * 0.15))
-                left_crop = max(0, left - int((right - left) * 0.15))
-                bottom_crop = min(h, bottom + int((bottom - top) * 0.15))
-                right_crop = min(w, right + int((right - left) * 0.15))
-
-                top_inner = max(0, top)
-                left_inner = max(0, left)
-                bottom_inner = min(h, bottom)
-                right_inner = min(w, right)
-
-                if right_inner - left_inner > 20 and bottom_inner - top_inner > 20:
-                    face_crop = image_rgb[top_inner:bottom_inner, left_inner:right_inner]
-                else:
-                    face_crop = image_rgb
-                expanded_crop = image_rgb[top_crop:bottom_crop, left_crop:right_crop]
-            except Exception:
-                face_crop = image_rgb
-                expanded_crop = image_rgb
+        # Parse face bounding box coordinates accurately
+        if face_box is not None and isinstance(face_box, (list, tuple)) and len(face_box) == 4:
+            b = [int(v) for v in face_box]
+            # Standard location format: [top, right, bottom, left]
+            top = max(0, min(h - 1, b[0]))
+            right = max(1, min(w, b[1]))
+            bottom = max(top + 1, min(h, b[2]))
+            left = max(0, min(right - 1, b[3]))
         else:
-            face_crop = image_rgb
-            expanded_crop = image_rgb
+            top, right, bottom, left = 0, w, h, 0
 
-        gray_face = cv2.cvtColor(face_crop, cv2.COLOR_RGB2GRAY)
+        fw = max(1, right - left)
+        fh = max(1, bottom - top)
+
+        if fw < 25 or fh < 25:
+            return {'liveness_passed': False, 'is_spoof': True, 'liveness_score': 0.0, 'reason': 'Face box too small'}
+
+        face_crop = image_rgb[top:bottom, left:right]
+
+        # Expanded crop (20% margin around face to inspect phone bezels & screen background)
+        exp_top = max(0, top - int(fh * 0.2))
+        exp_left = max(0, left - int(fw * 0.2))
+        exp_bottom = min(h, bottom + int(fh * 0.2))
+        exp_right = min(w, right + int(fw * 0.2))
+        exp_crop = image_rgb[exp_top:exp_bottom, exp_left:exp_right]
 
         # ── Test 1: Static EAR Variance (Across Scan Stream) ──
         if ear_history and len(ear_history) >= 4:
             ear_var = float(np.var(ear_history))
-            if ear_var < 0.00003:  # Completely static eyes across consecutive frames
+            if ear_var < 0.000025:  # Static frozen eyes across consecutive frames
                 return {
                     'liveness_passed': False,
                     'is_spoof': True,
                     'liveness_score': 0.1,
-                    'reason': 'Spoof Attack Blocked: Static eyes detected (Photo / Screen display)'
+                    'reason': 'Spoof Attack Blocked: Static photo detected (frozen eyes)'
                 }
 
         # ── Test 2: Specular Glare & Phone Glass Reflection ──
-        # Phone glass screens reflect room lights producing clipped highlight patches (RGB >= 248)
+        # Phone glass screens reflect room lights producing clipped highlight patches (RGB >= 250)
         hsv_face = cv2.cvtColor(face_crop, cv2.COLOR_RGB2HSV)
         v_channel = hsv_face[:, :, 2]
-        specular_mask = (v_channel >= 248)
+        specular_mask = (v_channel >= 250)
         specular_pct = float(np.mean(specular_mask) * 100.0)
 
         # Check if there are flat specular glare patches (typical on phone screen glass)
-        if specular_pct > 3.2:
+        if specular_pct > 5.0:
             glare_pixels = v_channel[specular_mask]
-            if len(glare_pixels) > 0 and float(np.std(glare_pixels)) < 2.5:
+            if len(glare_pixels) > 0 and float(np.std(glare_pixels)) < 2.0:
                 return {
                     'liveness_passed': False,
                     'is_spoof': True,
                     'liveness_score': 0.15,
                     'specular_pct': round(specular_pct, 1),
-                    'reason': 'Spoof Attack Blocked: Phone screen glass glare detected'
+                    'reason': 'Spoof Attack Blocked: Phone screen glass glare reflection'
                 }
 
-        # ── Test 3: 3D Surface Shading & Contrast Variance ──
-        # 3D human face under ambient light has rich 3D shading gradients across nose, cheeks, chin.
-        # 2D photo on a screen has flat 2D luminance illumination.
-        sobelx = cv2.Sobel(gray_face, cv2.CV_64F, 1, 0, ksize=3)
-        sobely = cv2.Sobel(gray_face, cv2.CV_64F, 0, 1, ksize=3)
-        gradient_mag = np.sqrt(sobelx**2 + sobely**2)
-        grad_std = float(np.std(gradient_mag))
+        # ── Test 3: Screen Bezel & Straight Edge Detection ──
+        if exp_crop.shape[0] > 30 and exp_crop.shape[1] > 30:
+            gray_exp = cv2.cvtColor(exp_crop, cv2.COLOR_RGB2GRAY)
+            edges = cv2.Canny(gray_exp, 50, 150)
+            lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=45, minLineLength=35, maxLineGap=4)
+            
+            long_straight_lines = 0
+            if lines is not None:
+                for line in lines:
+                    lx1, ly1, lx2, ly2 = line[0]
+                    ldx, ldy = abs(lx2 - lx1), abs(ly2 - ly1)
+                    if (ldx < 3 and ldy > 30) or (ldy < 3 and ldx > 30):
+                        long_straight_lines += 1
 
-        if grad_std < 7.5:
-            return {
-                'liveness_passed': False,
-                'is_spoof': True,
-                'liveness_score': 0.2,
-                'grad_std': round(grad_std, 2),
-                'reason': 'Spoof Attack Blocked: Flat 2D photo surface detected'
-            }
+            if long_straight_lines >= 4:
+                return {
+                    'liveness_passed': False,
+                    'is_spoof': True,
+                    'liveness_score': 0.1,
+                    'straight_lines': long_straight_lines,
+                    'reason': 'Spoof Attack Blocked: Phone hardware bezel / screen edge detected'
+                }
 
-        # ── Test 4: Screen Bezel & Straight Edge Detection ──
-        gray_exp = cv2.cvtColor(expanded_crop, cv2.COLOR_RGB2GRAY)
-        edges = cv2.Canny(gray_exp, 50, 150)
-        lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=45, minLineLength=40, maxLineGap=5)
-        
-        long_straight_lines = 0
-        if lines is not None:
-            for line in lines:
-                x1, y1, x2, y2 = line[0]
-                dx, dy = abs(x2 - x1), abs(y2 - y1)
-                if (dx < 4 and dy > 35) or (dy < 4 and dx > 35):
-                    long_straight_lines += 1
-
-        if long_straight_lines >= 3:
-            return {
-                'liveness_passed': False,
-                'is_spoof': True,
-                'liveness_score': 0.1,
-                'straight_lines': long_straight_lines,
-                'reason': 'Spoof Attack Blocked: Phone hardware bezel / screen edge detected'
-            }
-
-        # ── Test 5: YCrCb Human Skin Spectrum Reflection ──
+        # ── Test 4: YCrCb Human Skin Spectrum Reflection ──
         ycrcb = cv2.cvtColor(face_crop, cv2.COLOR_RGB2YCrCb)
         cr = ycrcb[:, :, 1]
         cb = ycrcb[:, :, 2]
         skin_mask = (cr >= 133) & (cr <= 173) & (cb >= 77) & (cb <= 127)
         skin_pct = float(np.mean(skin_mask) * 100.0)
 
-        if skin_pct < 18.0:
+        if skin_pct < 10.0:
             return {
                 'liveness_passed': False,
                 'is_spoof': True,
                 'liveness_score': round(skin_pct / 100.0, 2),
                 'skin_pct': round(skin_pct, 1),
-                'reason': 'Spoof Attack Blocked: Unnatural skin spectrum (Mobile screen LED backlight)'
+                'reason': 'Spoof Attack Blocked: Unnatural skin spectrum (LED backlight screen)'
             }
 
-        # Overall Liveness Score calculation
-        score = min(1.0, round((grad_std / 25.0) * 0.5 + (skin_pct / 60.0) * 0.5, 2))
-
+        # Real Human Verified!
         return {
             'liveness_passed': True,
             'is_spoof': False,
-            'liveness_score': score,
-            'grad_std': round(grad_std, 2),
+            'liveness_score': 0.95,
             'skin_pct': round(skin_pct, 1),
             'reason': 'Real human liveness verified'
         }
 
     except Exception as e:
         logger.error(f"[AntiSpoof] Multi-spectrum liveness error: {e}")
-        return {'liveness_passed': True, 'is_spoof': False, 'liveness_score': 0.8, 'reason': 'Liveness fallback'}
+        return {'liveness_passed': True, 'is_spoof': False, 'liveness_score': 0.85, 'reason': 'Liveness fallback'}
