@@ -199,7 +199,7 @@ def _seed_defaults():
             logger.info("[DB] Default admin created: admin@system.com / admin123")
 
         defaults = {
-            "liveness_enabled": "false",
+            "liveness_enabled": "true",
             "recognition_tolerance": "0.50",
             "arcface_tolerance": "0.40",
             "face_engine_backend": "auto",
