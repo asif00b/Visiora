@@ -96,6 +96,7 @@ export default function CameraCapture({ onCapture, maxImages = 8 }) {
         <video
           ref={videoRef}
           className={`w-full max-h-80 object-cover ${isActive ? 'block' : 'hidden'}`}
+          style={{ transform: 'scaleX(-1)' }}
           muted
           playsInline
         />

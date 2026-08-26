@@ -49,7 +49,7 @@ export default function Scanner() {
   const [notifications, setNotifications] = useState([])
   const [markedCount, setMarkedCount] = useState(0)
   const [debugToggles, setDebugToggles] = useState(debugRef.current)
-  const [mirrored, setMirrored] = useState(false)
+  const [mirrored, setMirrored] = useState(true)
   const [bioMessage, setBioMessage] = useState('')
   const [sensorTouch, setSensorTouch] = useState(false)
   const [livePreviewSrc, setLivePreviewSrc] = useState(null)
