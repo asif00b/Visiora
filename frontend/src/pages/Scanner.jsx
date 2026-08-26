@@ -636,16 +636,16 @@ export default function Scanner() {
           ref={containerRef}
           className={`relative mx-auto bg-black ${isFullscreen ? 'w-screen h-screen flex items-center justify-center' : 'w-full rounded-2xl overflow-hidden border border-slate-700'}`}
           style={isFullscreen ? {} : {
-            aspectRatio: '1.1 / 1',
-            maxWidth: 'min(650px, 82.5vh)',
-            maxHeight: '75vh'
+            aspectRatio: '16 / 9',
+            maxWidth: 'min(780px, 90vw)',
+            maxHeight: '78vh'
           }}
         >
           <div 
-            className="relative w-full h-full"
+            className="relative w-full h-full flex items-center justify-center"
             style={isFullscreen ? {
-              aspectRatio: '1.1 / 1',
-              maxWidth: 'min(100vw, 110vh)',
+              aspectRatio: '16 / 9',
+              maxWidth: '100vw',
               maxHeight: '100vh',
               margin: '0 auto',
               overflow: 'hidden',
@@ -663,7 +663,7 @@ export default function Scanner() {
             >
               <video
                 ref={videoRef}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-contain bg-slate-950"
                 style={{
                   transform: mirrored ? 'scaleX(-1)' : 'none'
                 }}

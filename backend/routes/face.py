@@ -740,35 +740,29 @@ def recognize_face():
         face_encoding = face_out.pop('_embedding', None)
 
         if matched and rec_confirmed and should_mark:
-            cache_key = _attendance_cache_key(user_id, session_id)
-            if cache_key in _session_marked_cache:
+            try:
+                mark_result = mark_attendance_once(user_id, session_id, status='present', note='Face Scanner IN/OUT')
+                face_out['attendance_marked'] = mark_result['marked']
+                face_out['attendance_status'] = mark_result['reason']
+                face_out['punch_type'] = mark_result.get('punch_type', 'IN')
+                face_out['message'] = mark_result.get('message', '')
+                
+                att = mark_result.get('attendance')
+                if att:
+                    face_out['in_time'] = att.timestamp.isoformat() if att.timestamp else None
+                    face_out['out_time'] = att.punch_out.isoformat() if att.punch_out else None
+                    
+                logger.info(
+                    f'[Attendance] user_id={user_id} '
+                    f'distance={round(face["distance"], 4)} '
+                    f'confidence={confidence}% '
+                    f'marked={mark_result["marked"]} '
+                    f'punch_type={mark_result.get("punch_type","?")} '
+                    f'reason={mark_result["reason"]}'
+                )
+            except Exception as mark_err:
+                logger.error(f'[Attendance] mark failed for user_id={user_id}: {mark_err}')
                 face_out['attendance_marked'] = False
-                face_out['attendance_status'] = 'already_marked_today'
-            else:
-                try:
-                    mark_result = mark_attendance_once(user_id, session_id)
-                    face_out['attendance_marked'] = mark_result['marked']
-                    face_out['attendance_status'] = mark_result['reason']
-                    face_out['punch_type'] = mark_result.get('punch_type', 'IN')
-                    
-                    att = mark_result.get('attendance')
-                    if att:
-                        face_out['in_time'] = att.timestamp.isoformat() if att.timestamp else None
-                        face_out['out_time'] = att.punch_out.isoformat() if att.punch_out else None
-                    
-                    if mark_result['marked'] and mark_result.get('punch_type') == 'OUT':
-                        _session_marked_cache.add(cache_key)
-                        
-                    logger.info(
-                        f'[Attendance] user_id={user_id} '
-                        f'distance={round(face["distance"], 4)} '
-                        f'confidence={confidence}% '
-                        f'marked={mark_result["marked"]} '
-                        f'punch_type={mark_result.get("punch_type","?")}'
-                    )
-                except Exception as mark_err:
-                    logger.error(f'[Attendance] mark failed for user_id={user_id}: {mark_err}')
-                    face_out['attendance_marked'] = False
         elif not matched and not is_spoof and face_encoding is not None and save_unknown:
             _save_unknown_face(image_data, engine, face['distance'], face_encoding)
 
