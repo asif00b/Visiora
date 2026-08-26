@@ -273,7 +273,7 @@ export default function Scanner() {
           if (mirrored) px = canvas.width - px
           ptCoords.push({ px, py })
 
-          // Render visual landmark dots
+          // Render visual facial landmark dots directly on the face
           ctx.beginPath()
           ctx.arc(px, py, 3.5, 0, 2 * Math.PI)
           if (idx <= 1) ctx.fillStyle = '#00d4ff'       // Eyes: Cyan
@@ -281,24 +281,24 @@ export default function Scanner() {
           else ctx.fillStyle = '#10b981'                // Mouth: Emerald
           ctx.fill()
           ctx.strokeStyle = '#ffffff'
-          ctx.lineWidth = 1
+          ctx.lineWidth = 1.2
           ctx.stroke()
         })
 
-        // Draw visual measurement connection lines between landmarks when Measurements debug ON
+        // Draw subtle measurement connection lines between landmarks when Measurements debug ON
         if (activeDebug.measurements && ptCoords.length >= 5) {
           ctx.save()
-          ctx.strokeStyle = 'rgba(0, 212, 255, 0.4)'
+          ctx.strokeStyle = 'rgba(0, 212, 255, 0.45)'
           ctx.lineWidth = 1.2
           ctx.setLineDash([3, 3])
 
-          // Draw inter-eye distance line
+          // Eye-to-eye line
           ctx.beginPath()
           ctx.moveTo(ptCoords[0].px, ptCoords[0].py)
           ctx.lineTo(ptCoords[1].px, ptCoords[1].py)
           ctx.stroke()
 
-          // Draw nose-to-mouth lines
+          // Nose-to-mouth lines
           ctx.beginPath()
           ctx.moveTo(ptCoords[2].px, ptCoords[2].py)
           ctx.lineTo(ptCoords[3].px, ptCoords[3].py)
@@ -307,39 +307,6 @@ export default function Scanner() {
           ctx.stroke()
           ctx.restore()
         }
-      }
-
-      // Visual Measurements HUD Card above face box when Measurements debug button ON
-      if (activeDebug.active && activeDebug.measurements) {
-        const diag = face.diagnostics || {}
-        const relMotion = diag.relative_internal_motion ?? 0.0
-        const earVar = diag.ear_variance ?? 0.0
-        const obsFrames = diag.observation_frames ?? 0
-        const isRigid = relMotion < 0.0002
-
-        const hudW = Math.max(180, w)
-        const hudH = 34
-        let hudX = x + (w - hudW) / 2
-        let hudY = y - hudH - 6
-        hudX = Math.max(8, Math.min(canvas.width - hudW - 8, hudX))
-        hudY = Math.max(8, Math.min(canvas.height - hudH - 8, hudY))
-
-        ctx.save()
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.92)'
-        ctx.strokeStyle = isRigid ? '#ef4444' : '#06b6d4'
-        ctx.lineWidth = 1
-        ctx.beginPath()
-        ctx.roundRect(hudX, hudY, hudW, hudH, 8)
-        ctx.fill()
-        ctx.stroke()
-
-        ctx.font = 'bold 9px monospace'
-        ctx.fillStyle = isRigid ? '#fca5a5' : '#67e8f9'
-        ctx.fillText(`REL-MOTION: ${relMotion.toFixed(4)} | ${isRigid ? 'R-FROZEN (SPOOF)' : 'DEFORMING (LIVE)'}`, hudX + 8, hudY + 14)
-
-        ctx.fillStyle = '#94a3b8'
-        ctx.fillText(`EAR-VAR: ${earVar.toFixed(6)} | OBS: ${obsFrames}/8`, hudX + 8, hudY + 26)
-        ctx.restore()
       }
 
       // ── Compact Name Badge Overlay (Sleek, Small Pill) ──
