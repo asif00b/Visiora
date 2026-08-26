@@ -163,10 +163,10 @@ def evaluate_real_human_liveness(image_rgb: np.ndarray, face_box=None, ear_histo
     """
     Evaluates whether a detected face image is a real, live human or a photo/screen spoof.
     Performs multi-layer anti-spoofing checks:
-      1. Static EAR Eye Aspect Ratio Variance (Catches frozen eyes on static photos across stream)
-      2. Specular Glare & Phone Glass Reflection Analysis
-      3. Phone Bezel & Screen Border Contrast Detection (Validates screen-to-casing contrast boundary)
-      4. CLAHE-Normalized Skin Color Spectrum (Normalizes low-light images for accurate skin verification)
+      1. Static EAR Eye Aspect Ratio Variance (Catches frozen eyes on static photos across 6+ frames)
+      2. Facial Skin Glass Reflection (Evaluates specular glare strictly on upper 75% face skin)
+      3. Phone Hardware Rectangular Frame Detection (Detects 4-sided convex phone display bezels)
+      4. CLAHE-Normalized Skin Color Spectrum (Normalizes lighting for accurate skin verification)
     Returns:
       {
         'liveness_passed': bool,
@@ -199,104 +199,114 @@ def evaluate_real_human_liveness(image_rgb: np.ndarray, face_box=None, ear_histo
         fh = max(1, bottom - top)
 
         if fw < 30 or fh < 30:
-            return {'liveness_passed': True, 'is_spoof': False, 'liveness_score': 0.8, 'reason': 'Small face'}
+            return {'liveness_passed': True, 'is_spoof': False, 'liveness_score': 0.85, 'reason': 'Small face'}
 
-        face_crop = image_rgb[top:bottom, left:right]
+        # Facial skin ROI: Upper 75% of face box (excludes white shirt collars / clothes at bottom)
+        skin_bottom = top + int(fh * 0.75)
+        face_skin_crop = image_rgb[top:skin_bottom, left:right]
 
-        # ── Test 1: Static EAR Variance (Across 5+ Scan Frames) ──
+        # ── Test 1: Static EAR Variance (Across 6+ Scan Frames) ──
         if ear_history and len(ear_history) >= 6:
             ear_var = float(np.var(ear_history))
             if ear_var < 0.000015:  # Static frozen eyes across 6+ frames
-                return {
+                res = {
                     'liveness_passed': False,
                     'is_spoof': True,
                     'liveness_score': 0.1,
                     'reason': 'Spoof Attack Blocked: Static photo detected (frozen eyes)'
                 }
+                logger.info(f"[Liveness] SPOOF DETECTED: {res['reason']}")
+                return res
 
-        # ── Test 2: Phone Glass Specular Reflection & Flat Highlight Glare ──
-        hsv_face = cv2.cvtColor(face_crop, cv2.COLOR_RGB2HSV)
-        v_channel = hsv_face[:, :, 2]
-        specular_mask = (v_channel >= 252)
+        # ── Test 2: Phone Glass Specular Reflection on Upper Face Skin ──
+        # Check specular glare strictly on facial skin (excluding white shirts)
+        hsv_skin = cv2.cvtColor(face_skin_crop, cv2.COLOR_RGB2HSV)
+        v_skin = hsv_skin[:, :, 2]
+        specular_mask = (v_skin >= 253)
         specular_pct = float(np.mean(specular_mask) * 100.0)
 
-        if specular_pct > 6.0:
-            glare_pixels = v_channel[specular_mask]
-            if len(glare_pixels) > 0 and float(np.std(glare_pixels)) < 1.5:
-                return {
+        # Phone glass screen reflection produces flat clipped patches (std dev < 1.0) over > 10% of facial skin
+        if specular_pct > 10.0:
+            glare_pixels = v_skin[specular_mask]
+            if len(glare_pixels) > 0 and float(np.std(glare_pixels)) < 1.0:
+                res = {
                     'liveness_passed': False,
                     'is_spoof': True,
                     'liveness_score': 0.15,
                     'specular_pct': round(specular_pct, 1),
                     'reason': 'Spoof Attack Blocked: Phone screen glass glare reflection'
                 }
+                logger.info(f"[Liveness] SPOOF DETECTED: {res['reason']}")
+                return res
 
-        # ── Test 3: Phone Screen Bezel Frame (Screen-to-Bezel Contrast Boundary) ──
-        # Expanded crop (15% margin around face)
-        exp_top = max(0, top - int(fh * 0.15))
-        exp_left = max(0, left - int(fw * 0.15))
-        exp_bottom = min(h, bottom + int(fh * 0.15))
-        exp_right = min(w, right + int(fw * 0.15))
+        # ── Test 3: Phone Hardware Rectangular Bezel Border ──
+        # Expanded crop (20% margin around face to check for phone body edges)
+        exp_top = max(0, top - int(fh * 0.20))
+        exp_left = max(0, left - int(fw * 0.20))
+        exp_bottom = min(h, bottom + int(fh * 0.20))
+        exp_right = min(w, right + int(fw * 0.20))
         exp_crop = image_rgb[exp_top:exp_bottom, exp_left:exp_right]
 
-        if exp_crop.shape[0] > 50 and exp_crop.shape[1] > 50:
+        if exp_crop.shape[0] > 60 and exp_crop.shape[1] > 60:
             gray_exp = cv2.cvtColor(exp_crop, cv2.COLOR_RGB2GRAY)
-            edges = cv2.Canny(gray_exp, 80, 200)
-            lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=50, minLineLength=45, maxLineGap=3)
-            
-            phone_bezel_lines = 0
-            if lines is not None:
-                for line in lines:
-                    lx1, ly1, lx2, ly2 = line[0]
-                    ldx, ldy = abs(lx2 - lx1), abs(ly2 - ly1)
-                    # Check for straight vertical or horizontal border lines
-                    if (ldx < 2 and ldy > 40) or (ldy < 2 and ldx > 40):
-                        # Verify line has sharp Screen (Bright > 140) vs Bezel (Dark < 70) contrast step
-                        mid_x, mid_y = (lx1 + lx2) // 2, (ly1 + ly2) // 2
-                        if 5 <= mid_x < gray_exp.shape[1] - 5 and 5 <= mid_y < gray_exp.shape[0] - 5:
-                            inner_p = float(gray_exp[mid_y, mid_x - 3]) if ldx < 2 else float(gray_exp[mid_y - 3, mid_x])
-                            outer_p = float(gray_exp[mid_y, mid_x + 3]) if ldx < 2 else float(gray_exp[mid_y + 3, mid_x])
-                            contrast = abs(inner_p - outer_p)
-                            if contrast > 80 and (inner_p > 130 or outer_p > 130) and (inner_p < 75 or outer_p < 75):
-                                phone_bezel_lines += 1
+            blur_exp = cv2.GaussianBlur(gray_exp, (5, 5), 0)
+            _, thresh_exp = cv2.threshold(blur_exp, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            contours, _ = cv2.findContours(thresh_exp, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
-            if phone_bezel_lines >= 3:
-                return {
+            rect_phone_detected = False
+            exp_area = exp_crop.shape[0] * exp_crop.shape[1]
+            for cnt in contours:
+                area = cv2.contourArea(cnt)
+                if 0.25 * exp_area < area < 0.85 * exp_area:
+                    peri = cv2.arcLength(cnt, True)
+                    approx = cv2.approxPolyDP(cnt, 0.04 * peri, True)
+                    if len(approx) == 4 and cv2.isContourConvex(approx):
+                        x_r, y_r, w_r, h_r = cv2.boundingRect(approx)
+                        aspect_ratio = float(h_r) / w_r if w_r > 0 else 0
+                        if 1.3 <= aspect_ratio <= 2.5:
+                            rect_phone_detected = True
+                            break
+
+            if rect_phone_detected:
+                res = {
                     'liveness_passed': False,
                     'is_spoof': True,
                     'liveness_score': 0.1,
-                    'bezel_lines': phone_bezel_lines,
-                    'reason': 'Spoof Attack Blocked: Phone screen bezel border detected'
+                    'reason': 'Spoof Attack Blocked: Phone rectangular hardware frame detected'
                 }
+                logger.info(f"[Liveness] SPOOF DETECTED: {res['reason']}")
+                return res
 
         # ── Test 4: CLAHE-Normalized Skin Tone Spectrum ──
-        # Apply CLAHE to Value channel to handle low ambient room lighting cleanly
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        v_norm = clahe.apply(v_channel)
-        hsv_norm = cv2.cvtColor(face_crop, cv2.COLOR_RGB2HSV)
-        h_ch, s_ch = hsv_norm[:, :, 0], hsv_norm[:, :, 1]
+        v_norm = clahe.apply(v_skin)
+        h_ch, s_ch = hsv_skin[:, :, 0], hsv_skin[:, :, 1]
 
-        # Warm skin hue: 0 <= Hue <= 28 or 155 <= Hue <= 180, Saturation >= 12
-        skin_mask = ((h_ch <= 28) | (h_ch >= 155)) & (s_ch >= 12) & (s_ch <= 235) & (v_norm >= 25)
+        # Warm skin hue: 0 <= Hue <= 30 or 150 <= Hue <= 180, Saturation >= 10
+        skin_mask = ((h_ch <= 30) | (h_ch >= 150)) & (s_ch >= 10) & (s_ch <= 245) & (v_norm >= 20)
         skin_pct = float(np.mean(skin_mask) * 100.0)
 
-        if skin_pct < 4.0:
-            return {
+        if skin_pct < 3.0:
+            res = {
                 'liveness_passed': False,
                 'is_spoof': True,
                 'liveness_score': round(skin_pct / 100.0, 2),
                 'skin_pct': round(skin_pct, 1),
                 'reason': 'Spoof Attack Blocked: Unnatural color spectrum (LED backlight screen)'
             }
+            logger.info(f"[Liveness] SPOOF DETECTED: {res['reason']}")
+            return res
 
         # Real Human Verified!
-        return {
+        res = {
             'liveness_passed': True,
             'is_spoof': False,
             'liveness_score': 0.95,
             'skin_pct': round(skin_pct, 1),
             'reason': 'Real human liveness verified'
         }
+        logger.debug(f"[Liveness] PASSED: real human verified (skin={round(skin_pct, 1)}%)")
+        return res
 
     except Exception as e:
         logger.error(f"[AntiSpoof] Multi-spectrum liveness error: {e}")
