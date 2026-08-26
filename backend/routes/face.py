@@ -687,10 +687,13 @@ def recognize_face():
                 face_location_box = [b['top'] * h, b['right'] * w, b['bottom'] * h, b['left'] * w]
 
         liveness_res = evaluate_real_human_liveness(image_rgb_decoded, face_location_box)
-        is_spoof = face.get('is_spoof', False) or liveness_res.get('is_spoof', False)
-        liveness_passed = face.get('liveness_passed', False) and liveness_res.get('liveness_passed', False)
+        
+        # Explicit Spoof check
+        is_spoof = bool(face.get('is_spoof', False) or liveness_res.get('is_spoof', False))
+        liveness_passed = bool(face.get('liveness_passed', False) and liveness_res.get('liveness_passed', False))
+        liveness_reason = liveness_res.get('reason', face.get('liveness_reason', 'LIVENESS_CHECK'))
 
-        # If spoofing / photo / screen display is detected or unverified, block matching and attendance
+        # Only allow matching and attendance when liveness is explicitly PASSED (LIVE_VERIFIED)
         if is_spoof or not liveness_passed:
             matched = False
             rec_confirmed = False
@@ -718,10 +721,10 @@ def recognize_face():
             'confidence':        confidence,
             'confidence_label':  confidence_label,
             'attendance_marked': False,
-            'liveness_passed':   liveness_passed and not is_spoof,
+            'liveness_passed':   liveness_passed,
             'is_spoof':          is_spoof,
             'liveness_score':    liveness_res.get('liveness_score', 0.05 if is_spoof else 0.95),
-            'liveness_reason':   liveness_res.get('reason', 'Spoof Attack Blocked' if is_spoof else 'Real human verified'),
+            'liveness_reason':   liveness_reason,
             'diagnostics':       liveness_res.get('diagnostics', {})
         }
 

@@ -229,38 +229,53 @@ def evaluate_real_human_liveness(
     }
 
     # Decision Logic across observation window
-    if obs_count < observation_window and not has_blink and mean_motion < 0.004:
-        # Pending observation window completion
+    # ── Rule 1: Confirmed Live Human (Passes micro-motion or eye blink) ──
+    if has_blink or mean_motion >= 0.0008 or ear_var >= 0.000015:
+        diagnostics['live_confidence'] = 0.95
+        diagnostics['spoof_confidence'] = 0.05
         return {
-            'liveness_passed': False,
+            'liveness_passed': True,
             'is_spoof': False,
-            'liveness_score': 0.5,
-            'decision': 'LIVENESS_CHECK',
-            'reason': f'Collecting temporal observation ({obs_count}/{observation_window} frames)...',
+            'liveness_score': 0.95,
+            'decision': 'LIVE_VERIFIED',
+            'reason': 'Real human verified: Temporal micro-motion & landmark dynamics confirmed',
             'diagnostics': diagnostics
         }
 
-    # Frozen static check (static photo or frozen phone screen)
-    if obs_count >= observation_window and ear_var < 0.000008 and mean_motion < 0.0012 and not has_blink:
+    # ── Rule 2: Pending Observation Evidence -> MUST STAY LIVENESS_CHECK (is_spoof = False) ──
+    if obs_count < observation_window:
+        diagnostics['live_confidence'] = 0.50
+        diagnostics['spoof_confidence'] = 0.50
+        return {
+            'liveness_passed': False,
+            'is_spoof': False,
+            'liveness_score': 0.50,
+            'decision': 'LIVENESS_CHECK',
+            'reason': f'Collecting temporal evidence ({obs_count}/{observation_window} frames)...',
+            'diagnostics': diagnostics
+        }
+
+    # ── Rule 3: Confirmed Frozen Static Photo / Display (ONLY after 12+ frames with 0 motion) ──
+    if obs_count >= 12 and ear_var < 0.000005 and mean_motion < 0.0005 and not has_blink:
         diagnostics['live_confidence'] = 0.05
         diagnostics['spoof_confidence'] = 0.95
         return {
             'liveness_passed': False,
             'is_spoof': True,
             'liveness_score': 0.05,
-            'decision': 'SPOOF',
-            'reason': 'Spoof Rejected: Frozen temporal evidence (static photo / phone screen image)',
+            'decision': 'SPOOF_DETECTED',
+            'reason': 'Spoof Rejected: Frozen temporal evidence across 12+ frames (static photo / phone screen image)',
             'diagnostics': diagnostics
         }
 
-    # Real Human Verified!
-    diagnostics['live_confidence'] = 0.95
-    diagnostics['spoof_confidence'] = 0.05
+    # Default Fallback: Remain in LIVENESS_CHECK until conclusive evidence (NEVER default to SPOOF)
+    diagnostics['live_confidence'] = 0.50
+    diagnostics['spoof_confidence'] = 0.50
     return {
-        'liveness_passed': True,
+        'liveness_passed': False,
         'is_spoof': False,
-        'liveness_score': 0.95,
-        'decision': 'LIVE',
-        'reason': 'Real human verified: Temporal micro-motion & landmark dynamics confirmed',
+        'liveness_score': 0.50,
+        'decision': 'LIVENESS_CHECK',
+        'reason': f'Evaluating temporal evidence ({obs_count} frames)...',
         'diagnostics': diagnostics
     }
