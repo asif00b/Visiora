@@ -644,7 +644,7 @@ def recognize_face():
         }), 503
 
     tolerance = float(
-        SystemConfig.get('arcface_tolerance', '0.40')
+        SystemConfig.get('arcface_tolerance', '0.48')
         if getattr(engine, 'backend', 'dlib') == 'arcface'
         else SystemConfig.get('recognition_tolerance', '0.50')
     )
@@ -662,7 +662,8 @@ def recognize_face():
             min_face_size=min_face_size,
         )
     except Exception as e:
-        logger.error(f'[Recognize] Engine error: {e}')
+        import traceback as _tb
+        logger.error(f'[Recognize] Engine error: {e}\n{_tb.format_exc()}')
         return jsonify({'success': False, 'message': f'Recognition error: {e}', 'faces': []}), 500
 
     output = []
@@ -675,23 +676,14 @@ def recognize_face():
     seen_matched_user_ids = set()
 
     for face in results:
-        confidence       = round((1 - face['distance']) * 100, 1)
+        dist_val = float(face.get('distance', 1.0)) if face.get('distance') is not None else 1.0
+        confidence = round((1.0 - dist_val) * 100, 1)
         confidence_label = ('High' if confidence >= 85 else 'Medium' if confidence >= 65 else 'Low')
 
-        # Real Human Liveness & Anti-Spoofing Check
-        face_location_box = face.get('location')
-        if not face_location_box and face.get('box'):
-            b = face['box']
-            if image_rgb_decoded is not None:
-                h, w = image_rgb_decoded.shape[:2]
-                face_location_box = [b['top'] * h, b['right'] * w, b['bottom'] * h, b['left'] * w]
-
-        liveness_res = evaluate_real_human_liveness(image_rgb_decoded, face_location_box)
-        
-        # Explicit Spoof check
-        is_spoof = bool(face.get('is_spoof', False) or liveness_res.get('is_spoof', False))
-        liveness_passed = bool(face.get('liveness_passed', False) and liveness_res.get('liveness_passed', False))
-        liveness_reason = liveness_res.get('reason', face.get('liveness_reason', 'LIVENESS_CHECK'))
+        # Honor stateful liveness result from tracker pipeline
+        is_spoof = bool(face.get('is_spoof', False))
+        liveness_passed = bool(face.get('liveness_passed', False)) and not is_spoof
+        liveness_reason = face.get('liveness_reason', 'Spoof Attack Blocked' if is_spoof else 'Real human verified')
 
         # Only allow matching and attendance when liveness is explicitly PASSED (LIVE_VERIFIED)
         if is_spoof or not liveness_passed:
@@ -706,9 +698,12 @@ def recognize_face():
             user_name = face.get('name', 'Unknown')
 
             # Deduplicate: Only allow primary live face per user per frame
-            if matched and rec_confirmed:
+            if matched:
                 if user_id in seen_matched_user_ids:
                     rec_confirmed = False
+                    matched = False
+                    user_id = 'Unknown'
+                    user_name = 'Unknown'
                 else:
                     seen_matched_user_ids.add(user_id)
 
@@ -723,9 +718,9 @@ def recognize_face():
             'attendance_marked': False,
             'liveness_passed':   liveness_passed,
             'is_spoof':          is_spoof,
-            'liveness_score':    liveness_res.get('liveness_score', 0.05 if is_spoof else 0.95),
+            'liveness_score':    face.get('liveness_score', 0.05 if is_spoof else 0.95),
             'liveness_reason':   liveness_reason,
-            'diagnostics':       liveness_res.get('diagnostics', {})
+            'diagnostics':       face.get('diagnostics', {})
         }
 
         # Fetch additional user details (student_id, photo)
@@ -757,7 +752,7 @@ def recognize_face():
                     
                 logger.info(
                     f'[Attendance] user_id={user_id} '
-                    f'distance={round(face["distance"], 4)} '
+                    f'distance={round(dist_val, 4)} '
                     f'confidence={confidence}% '
                     f'marked={mark_result["marked"]} '
                     f'punch_type={mark_result.get("punch_type","?")} '
@@ -767,7 +762,7 @@ def recognize_face():
                 logger.error(f'[Attendance] mark failed for user_id={user_id}: {mark_err}')
                 face_out['attendance_marked'] = False
         elif not matched and not is_spoof and face_encoding is not None and save_unknown:
-            _save_unknown_face(image_data, engine, face['distance'], face_encoding)
+            _save_unknown_face(image_data, engine, dist_val, face_encoding)
 
         output.append(face_out)
 

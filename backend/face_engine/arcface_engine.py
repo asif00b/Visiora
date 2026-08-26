@@ -159,6 +159,12 @@ class EmbeddingsDB:
                 return int(self.known_ids[best_idx]), best_sim * 100, best_dist
             return "Unknown", best_sim * 100, best_dist
 
+    def find_matches(self, probe_emb, tolerance=0.40, top_k=3):
+        uid, conf, dist = self.match(probe_emb, tolerance=tolerance)
+        if uid != "Unknown":
+            return [{"user_id": uid, "confidence": conf, "distance": dist}]
+        return []
+
     def compare(self, known_list, probe):
         if not known_list:
             return np.array([])
@@ -211,7 +217,7 @@ class ArcFaceEngine:
             self._app = FaceAnalysis(
                 name=self._model_name,
                 providers=providers,
-                allowed_modules=["detection", "recognition"],
+                allowed_modules=["detection", "recognition", "landmark_2d_106"],
             )
             self._app.prepare(ctx_id=ctx_id, det_thresh=det_thresh, det_size=(self._det_size, self._det_size))
         except Exception as exc:
@@ -220,7 +226,7 @@ class ArcFaceEngine:
                 self._app = FaceAnalysis(
                     name=self._model_name,
                     providers=["CPUExecutionProvider"],
-                    allowed_modules=["detection", "recognition"],
+                    allowed_modules=["detection", "recognition", "landmark_2d_106"],
                 )
                 self._app.prepare(ctx_id=-1, det_thresh=det_thresh, det_size=(self._det_size, self._det_size))
             else:
@@ -447,17 +453,39 @@ class ArcFaceEngine:
         pipeline = TrackingPipeline.get_instance()
 
         def detector_func(frame):
-            return self._app.det_model.detect(frame, max_num=10, metric="default")
+            faces = self._app.get(frame)
+            bboxes = []
+            kpss = []
+            for f in faces:
+                score = float(getattr(f, 'det_score', 0.99))
+                b = [float(f.bbox[0]), float(f.bbox[1]), float(f.bbox[2]), float(f.bbox[3]), score]
+                bboxes.append(b)
+                c5 = getattr(f, 'kps', None)
+                l106 = getattr(f, 'landmark_2d_106', c5)
+                if c5 is not None:
+                    kpss.append({'canonical_5': c5, 'landmarks_106': l106 if l106 is not None else c5})
+                else:
+                    kpss.append(None)
+            if bboxes:
+                bboxes = np.array(bboxes, dtype=np.float32)
+            else:
+                bboxes = np.empty((0, 5), dtype=np.float32)
+            return bboxes, kpss
 
         def recognizer_func(frame, crops_info):
             results = []
-            for bbox, kps in crops_info:
-                if kps is None:
+            for bbox, kps_data in crops_info:
+                if kps_data is None:
                     results.append(_unknown_result())
                     continue
 
                 try:
-                    aligned = face_align.norm_crop(frame, landmark=np.asarray(kps), image_size=112)
+                    align_kps = kps_data.get('canonical_5') if isinstance(kps_data, dict) else kps_data
+                    if align_kps is None:
+                        results.append(_unknown_result())
+                        continue
+
+                    aligned = face_align.norm_crop(frame, landmark=np.asarray(align_kps[:5], dtype=np.float32), image_size=112)
                     if CV2_AVAILABLE and cv2.Laplacian(aligned, cv2.CV_64F).var() < 45:
                         results.append(_unknown_result())
                         continue
@@ -483,6 +511,9 @@ class ArcFaceEngine:
 
     def compare_encodings(self, known_list: list, probe) -> np.ndarray:
         return self._db.compare(known_list, probe)
+
+    def find_matches(self, probe_emb, tolerance=0.40, top_k=3):
+        return self._db.find_matches(probe_emb, tolerance=tolerance, top_k=top_k)
 
     def is_duplicate_unknown(
         self,

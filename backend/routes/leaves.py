@@ -428,3 +428,84 @@ def delete_leave(leave_id):
         db.session.rollback()
         logger.error(f'[Leaves] Delete error: {e}')
         return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@leaves_bp.route('/leaves/email-webhook', methods=['POST'])
+def email_leave_webhook():
+    """
+    Webhook endpoint to parse incoming email for leave requests.
+    Expects JSON payload:
+    {
+        "sender": "user@example.com",
+        "subject": "Leave Application",
+        "body": "User ID: 1234\nName: ASIF\nI need sick leave for 2 days..."
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        sender = data.get('sender') or data.get('from') or data.get('email', '')
+        subject = data.get('subject') or data.get('title', '')
+        body = data.get('body') or data.get('content') or data.get('text', '')
+
+        if not body and not subject:
+            return jsonify({'success': False, 'message': 'Email subject or body required'}), 400
+
+        from services.email_leave_parser import parse_and_process_email_leave
+        res = parse_and_process_email_leave(sender_email=sender, subject=subject, body_text=body)
+
+        status_code = 201 if res.get('action') == 'created' else 200
+        return jsonify(res), status_code
+
+    except Exception as e:
+        logger.error(f'[Leaves] Email webhook error: {e}')
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@leaves_bp.route('/leaves/poll-emails', methods=['POST', 'GET'])
+def poll_emails_endpoint():
+    """
+    Trigger IMAP Gmail polling manually or via scheduler.
+    Fetches unread emails from configured Gmail inbox, parses leave requests,
+    and returns processing result.
+    """
+    try:
+        from services.email_leave_parser import fetch_and_process_gmail_inbox
+        res = fetch_and_process_gmail_inbox()
+        return jsonify(res), 200
+    except Exception as e:
+        logger.error(f'[Leaves] Poll emails error: {e}')
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@leaves_bp.route('/leaves/gmail-config', methods=['GET', 'POST'])
+def gmail_config_endpoint():
+    """
+    Get or save Gmail receiver configuration in SystemConfig.
+    """
+    try:
+        from models.unknown_face import SystemConfig
+        if request.method == 'POST':
+            data = request.get_json() or {}
+            receiver = data.get('gmail_receiver_email', '').strip()
+            password = data.get('gmail_app_password', '').strip()
+
+            if receiver:
+                SystemConfig.set('gmail_receiver_email', receiver)
+            if password:
+                SystemConfig.set('gmail_app_password', password)
+
+            return jsonify({'success': True, 'message': 'Gmail receiver credentials saved successfully!'}), 200
+
+        # GET
+        current_email = SystemConfig.get('gmail_receiver_email', '')
+        has_pass = bool(SystemConfig.get('gmail_app_password', ''))
+        return jsonify({
+            'success': True,
+            'gmail_receiver_email': current_email,
+            'is_password_set': has_pass
+        }), 200
+
+    except Exception as e:
+        logger.error(f'[Leaves] Gmail config error: {e}')
+        return jsonify({'success': False, 'message': str(e)}), 500
+

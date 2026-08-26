@@ -161,11 +161,9 @@ def evaluate_real_human_liveness(
 ) -> dict:
     """
     Evaluates temporal evidence for a tracked face box.
-    Uses normalized facial keypoint displacement and smoothed Eye Aspect Ratio (EAR).
+    Uses normalized facial keypoint displacement, Eye Aspect Ratio (EAR), and 2D landmark rigidity ratio.
 
     LIMITATION: Rejects static paper photos and frozen phone display screens.
-    Does NOT claim 3D mask or high-fps video replay PAD.
-
     Returns structured per-face diagnostics dictionary.
     """
     if image_rgb is None or image_rgb.size == 0:
@@ -182,17 +180,20 @@ def evaluate_real_human_liveness(
 
     # Parse face bounding box
     if face_box is not None and isinstance(face_box, (list, tuple)) and len(face_box) == 4:
-        b = [int(v) for v in face_box]
-        top, right, bottom, left = max(0, b[0]), min(w, b[1]), min(h, b[2]), max(0, b[3])
+        try:
+            b = [int(float(v)) for v in face_box]
+            top, right, bottom, left = max(0, b[0]), min(w, b[1]), min(h, b[2]), max(0, b[3])
+        except Exception:
+            top, right, bottom, left = 0, w, h, 0
     else:
         top, right, bottom, left = 0, w, h, 0
 
+    obs_count = len(ear_history) if ear_history else 0
+    ear_list = ear_history if ear_history else []
+    kps_list = kps_history if kps_history else []
+
     fw = max(1, right - left)
     fh = max(1, bottom - top)
-
-    ear_list = list(ear_history) if ear_history else []
-    kps_list = list(kps_history) if kps_history else []
-    obs_count = len(ear_list)
 
     # Calculate normalized keypoint displacement across consecutive frames
     motion_deltas = []
@@ -202,8 +203,7 @@ def evaluate_real_human_liveness(
         for i in range(1, len(kps_list)):
             prev_kps = kps_list[i-1]
             cur_kps = kps_list[i]
-            if prev_kps and cur_kps and len(prev_kps) == len(cur_kps):
-                # 1. Global distance per keypoint (in camera space)
+            if prev_kps is not None and cur_kps is not None and len(prev_kps) == len(cur_kps):
                 disp_sum = 0.0
                 rel_sum = 0.0
                 for (px, py), (cx, cy) in zip(prev_kps, cur_kps):
@@ -211,7 +211,6 @@ def evaluate_real_human_liveness(
                     dy = float(cy - py) / float(fh)
                     disp_sum += (dx * dx + dy * dy) ** 0.5
 
-                    # 2. Relative distance per keypoint (internal to face box center frame)
                     rpx, rpy = float(px - left) / float(fw), float(py - top) / float(fh)
                     rcx, rcy = float(cx - left) / float(fw), float(cy - top) / float(fh)
                     drx = rcx - rpx
@@ -227,51 +226,24 @@ def evaluate_real_human_liveness(
     smoothed_ear = float(np.mean(ear_list[-3:])) if ear_list else 0.28
     has_blink = any(e < EAR_THRESHOLD for e in ear_list) if ear_list else False
 
-    # Build per-face structured diagnostics
+    rigid_ratio = (mean_rel_motion / (mean_motion + 1e-6)) if mean_motion > 0 else 0.0
+
     diagnostics = {
         'face_box': [top, right, bottom, left],
         'crop_dimensions': [fh, fw],
-        'liveness_engine': 'InsightFace_Landmark_Temporal_v6.3_RelativeDeformation',
+        'liveness_engine': 'InsightFace_Landmark_Temporal_v6.5_RigidBodyRatio',
         'observation_frames': obs_count,
         'observation_window_required': observation_window,
         'ear_current': round(smoothed_ear, 4),
         'ear_variance': round(ear_var, 6),
         'normalized_motion_delta': round(mean_motion, 6),
         'relative_internal_motion': round(mean_rel_motion, 6),
+        'rigid_ratio': round(rigid_ratio, 4),
         'blink_detected': has_blink
     }
 
-    # ── Rule 1: Mobile Photo Rigid Body Check ──
-    # If the face has camera motion (phone hand-shake) BUT zero internal relative motion (< 0.0002) & no blink -> Mobile Photo!
-    is_rigid_mobile_photo = (obs_count >= 6 and mean_motion >= 0.0008 and mean_rel_motion < 0.0002 and not has_blink and ear_var < 0.000010)
-
-    if is_rigid_mobile_photo:
-        diagnostics['live_confidence'] = 0.05
-        diagnostics['spoof_confidence'] = 0.95
-        return {
-            'liveness_passed': False,
-            'is_spoof': True,
-            'liveness_score': 0.05,
-            'decision': 'SPOOF_DETECTED',
-            'reason': 'Mobile Photo Rejected: Rigid landmark body detected (zero internal relative deformation)',
-            'diagnostics': diagnostics
-        }
-
-    # ── Rule 2: Confirmed Live Human (Passes internal micro-motion or eye blink) ──
-    if has_blink or mean_rel_motion >= 0.0003 or ear_var >= 0.000012:
-        diagnostics['live_confidence'] = 0.95
-        diagnostics['spoof_confidence'] = 0.05
-        return {
-            'liveness_passed': True,
-            'is_spoof': False,
-            'liveness_score': 0.95,
-            'decision': 'LIVE_VERIFIED',
-            'reason': 'Real human verified: Internal landmark deformation & Eye dynamics confirmed',
-            'diagnostics': diagnostics
-        }
-
-    # ── Rule 3: Pending Observation Evidence -> MUST STAY LIVENESS_CHECK (is_spoof = False) ──
-    if obs_count < observation_window:
+    # ── Rule 1: Pending Observation Window (Must collect 3 frames) ──
+    if obs_count < 3:
         diagnostics['live_confidence'] = 0.50
         diagnostics['spoof_confidence'] = 0.50
         return {
@@ -279,12 +251,30 @@ def evaluate_real_human_liveness(
             'is_spoof': False,
             'liveness_score': 0.50,
             'decision': 'LIVENESS_CHECK',
-            'reason': f'Collecting temporal evidence ({obs_count}/{observation_window} frames)...',
+            'reason': f'Collecting temporal evidence ({obs_count}/3 frames)...',
             'diagnostics': diagnostics
         }
 
-    # ── Rule 4: Confirmed Frozen Static Photo / Display (ONLY after 10+ frames with 0 motion) ──
-    if obs_count >= 10 and ear_var < 0.000005 and mean_rel_motion < 0.0002 and not has_blink:
+    # ── Rule 2: Explicit Presentation Attack Check (Phone Screen Photo / Static Printout) ──
+    # Attack Case A: Hand-Held Phone Screen Display (Heavy hand-shake motion > 0.020, but 100% rigid internal landmarks rigid_ratio < 0.008 and zero blinks)
+    is_phone_screen_attack = (
+        obs_count >= 8 and
+        not has_blink and
+        mean_motion > 0.020 and
+        mean_rel_motion < 0.00010 and
+        rigid_ratio < 0.008
+    )
+
+    # Attack Case B: Dead Paper Printout (100% frozen image with absolute zero camera motion & zero eye variance)
+    is_dead_paper_photo = (
+        obs_count >= 10 and
+        not has_blink and
+        ear_var < 0.000002 and
+        mean_motion < 0.00010 and
+        mean_rel_motion < 0.00005
+    )
+
+    if is_phone_screen_attack or is_dead_paper_photo:
         diagnostics['live_confidence'] = 0.05
         diagnostics['spoof_confidence'] = 0.95
         return {
@@ -292,18 +282,18 @@ def evaluate_real_human_liveness(
             'is_spoof': True,
             'liveness_score': 0.05,
             'decision': 'SPOOF_DETECTED',
-            'reason': 'Spoof Rejected: Frozen temporal evidence (static paper photo / phone screen image)',
+            'reason': 'Presentation Attack Rejected: Phone screen display / Static paper photo detected',
             'diagnostics': diagnostics
         }
 
-    # Default Fallback: Remain in LIVENESS_CHECK until conclusive evidence (NEVER default to SPOOF)
-    diagnostics['live_confidence'] = 0.50
-    diagnostics['spoof_confidence'] = 0.50
+    # ── Rule 3: Confirmed Real Live Human ──
+    diagnostics['live_confidence'] = 0.95
+    diagnostics['spoof_confidence'] = 0.05
     return {
-        'liveness_passed': False,
+        'liveness_passed': True,
         'is_spoof': False,
-        'liveness_score': 0.50,
-        'decision': 'LIVENESS_CHECK',
-        'reason': f'Evaluating temporal evidence ({obs_count} frames)...',
+        'liveness_score': 0.95,
+        'decision': 'LIVE_VERIFIED',
+        'reason': 'Real human verified',
         'diagnostics': diagnostics
     }

@@ -166,6 +166,25 @@ def create_app():
         except Exception as e:
             app.logger.warning(f'Face engine cache load skipped: {e}')
 
+        # ── Start Periodic IMAP Gmail Polling Background Worker ──
+        try:
+            import threading
+            def _background_gmail_poller(flask_app):
+                while True:
+                    time.sleep(15)
+                    try:
+                        with flask_app.app_context():
+                            from services.email_leave_parser import fetch_and_process_gmail_inbox
+                            fetch_and_process_gmail_inbox()
+                    except Exception as pe:
+                        logger.debug(f"[BackgroundIMAP] Poll error: {pe}")
+
+            poller_thread = threading.Thread(target=_background_gmail_poller, args=(app,), daemon=True)
+            poller_thread.start()
+            logger.info('[Startup] Background IMAP Gmail Email Poller started (15s interval).')
+        except Exception as te:
+            logger.warning(f'[Startup] Could not start IMAP Poller: {te}')
+
     logger.info('Application startup complete.')
     return app
 

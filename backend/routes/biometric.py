@@ -145,75 +145,79 @@ def verify_fingerprint_and_mark():
     Live Biometric Scan via Futronic FS80H:
     Capture fingerprint, match against database templates using SIFT matching, and mark IN/OUT Punch!
     """
-    data = request.get_json() or {}
-    session_id = data.get('session_id')
+    try:
+        data = request.get_json() or {}
+        session_id = data.get('session_id')
 
-    # Search all enrolled fingerprints in database
-    all_fingerprints = UserFingerprint.query.all()
-    if not all_fingerprints:
+        # Search all enrolled fingerprints in database
+        all_fingerprints = UserFingerprint.query.all()
+        if not all_fingerprints:
+            return jsonify({
+                'success': False, 
+                'matched': False, 
+                'message': 'No fingerprints enrolled in database.'
+            }), 200
+
+        # All templates must be validated via SourceAFIS native SDK
+        records = [{"userId": fp.user_id, "templateB64": fp.template_b64} for fp in all_fingerprints]
+        matched_user_id = verify_fingerprint_native(records)
+
+        if not matched_user_id:
+            return jsonify({
+                'success': False,
+                'matched': False,
+                'message': 'No matching fingerprint found. Please try again.',
+                'confidence': 0.0
+            }), 200
+
+        # Find the matching database record
+        best_match = UserFingerprint.query.filter_by(user_id=matched_user_id).first()
+        if not best_match:
+            return jsonify({'success': False, 'message': 'Match found but record missing.'}), 400
+
+        user = best_match.user
+        if not user or not user.is_active:
+            return jsonify({'success': False, 'message': 'User account is inactive'}), 400
+
+        # Trigger IN/OUT Punch Attendance
+        result = mark_attendance_once(
+            user_id=user.id,
+            session_id=session_id,
+            status='present',
+            note=f'Biometric IN/OUT ({best_match.finger_name})',
+        )
+
+        record = result.get('attendance')
+        marked = result.get('marked', False)
+        punch_type = result.get('punch_type', 'IN')
+        reason = result.get('reason', 'unknown')
+
+        if marked:
+            msg = f"Fingerprint Verified! {user.name} ({punch_type} Punch)"
+        elif reason == 'cooldown':
+            msg = result.get('message', f"Fingerprint Verified: {user.name} (Cooldown active: min 10 min wait between punches)")
+        elif reason == 'already_marked_today':
+            msg = f"Fingerprint Verified: {user.name} (Attendance already completed for today)"
+        else:
+            msg = result.get('message', f"Fingerprint Verified: {user.name}")
+
         return jsonify({
-            'success': False, 
-            'matched': False, 
-            'message': 'No fingerprints enrolled in database.'
+            'success': True,
+            'matched': True,
+            'attendance_marked': marked,
+            'reason': reason,
+            'confidence': 99.0,
+            'user': user.to_dict(),
+            'punch_type': punch_type,
+            'in_time': record.timestamp.isoformat() if record and record.timestamp else None,
+            'out_time': record.punch_out.isoformat() if record and record.punch_out else None,
+            'target_hours': user.weekly_target_hours or 40.0,
+            'timestamp': record.timestamp.isoformat() if record and record.timestamp else datetime.utcnow().isoformat(),
+            'message': msg
         }), 200
-
-    # All templates must be validated via SourceAFIS native SDK
-    records = [{"userId": fp.user_id, "templateB64": fp.template_b64} for fp in all_fingerprints]
-    matched_user_id = verify_fingerprint_native(records)
-
-    if not matched_user_id:
-        return jsonify({
-            'success': False,
-            'matched': False,
-            'message': 'No matching fingerprint found. Please try again.',
-            'confidence': 0.0
-        }), 200
-
-    # Find the matching database record
-    best_match = UserFingerprint.query.filter_by(user_id=matched_user_id).first()
-    if not best_match:
-        return jsonify({'success': False, 'message': 'Match found but record missing.'}), 400
-
-    user = best_match.user
-    if not user or not user.is_active:
-        return jsonify({'success': False, 'message': 'User account is inactive'}), 400
-
-    # Trigger IN/OUT Punch Attendance
-    result = mark_attendance_once(
-        user_id=user.id,
-        session_id=session_id,
-        status='present',
-        note=f'Biometric IN/OUT ({best_match.finger_name})',
-    )
-
-    record = result.get('attendance')
-    marked = result.get('marked', False)
-    punch_type = result.get('punch_type', 'IN')
-    reason = result.get('reason', 'unknown')
-
-    if marked:
-        msg = f"Fingerprint Verified! {user.name} ({punch_type} Punch)"
-    elif reason == 'cooldown':
-        msg = result.get('message', f"Fingerprint Verified: {user.name} (Cooldown active: min 10 min wait between punches)")
-    elif reason == 'already_marked_today':
-        msg = f"Fingerprint Verified: {user.name} (Attendance already completed for today)"
-    else:
-        msg = result.get('message', f"Fingerprint Verified: {user.name}")
-
-    return jsonify({
-        'success': True,
-        'matched': True,
-        'attendance_marked': marked,
-        'reason': reason,
-        'confidence': 99.0,
-        'user': user.to_dict(),
-        'punch_type': punch_type,
-        'in_time': record.timestamp.isoformat() if record and record.timestamp else None,
-        'out_time': record.punch_out.isoformat() if record and record.punch_out else None,
-        'target_hours': user.weekly_target_hours or 40.0,
-        'timestamp': record.timestamp.isoformat() if record and record.timestamp else datetime.utcnow().isoformat(),
-        'message': msg
-    }), 200
+    except Exception as e:
+        logger.error(f"[Biometric Verify] Exception: {e}")
+        return jsonify({'success': False, 'matched': False, 'message': f'Biometric scan error: {e}'}), 200
 
 
 @biometric_bp.route('/biometric/user/<int:uid>', methods=['GET'])

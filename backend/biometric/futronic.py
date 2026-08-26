@@ -131,8 +131,8 @@ def verify_fingerprint_native(records: list) -> int:
                 json.dump(records, f)
                 
             # 1. Capture BMP
-            logger.info("[Futronic Native Verify] Waiting for finger on scanner...")
-            res = subprocess.run([SCANNER_EXE, scan_file], capture_output=True, text=True, timeout=20)
+            logger.info("[Futronic Native Verify] Checking finger on scanner...")
+            res = subprocess.run([SCANNER_EXE, scan_file], capture_output=True, text=True, timeout=3)
             if res.returncode == 0 and os.path.exists(scan_file):
                 # 2. Verify with SourceAFIS 1:N
                 logger.info(f"[Futronic Native Verify] Matching against {len(records)} templates...")

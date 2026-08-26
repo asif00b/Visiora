@@ -165,8 +165,8 @@ export default function GuidedCapture({ onCapture, maxImages = 10 }) {
   // ── Poll backend for face analysis ──────────────────────────────────────
   const isProcessingRef = useRef(false)
   const goodFramesRef   = useRef(0)
-  const FRAMES_TO_CAPTURE = 2
-  const YAW_THRESHOLD = 12
+  const FRAMES_TO_CAPTURE = 1
+  const YAW_THRESHOLD = 6
 
   useEffect(() => {
     if (!isActive || isDone || !isScanning) return
@@ -206,30 +206,30 @@ export default function GuidedCapture({ onCapture, maxImages = 10 }) {
           return
         }
 
-        // Step 1: Smile check
+        // Step 1: Smile check (soft check)
         if (currentStep.needsSmile && !d.is_smiling) {
           goodFramesRef.current = 0
           setStatus('analyzing')
           setHoldProgress(0)
-          setInstruction('Now smile! 😊')
+          setInstruction('Look straight & smile! 😊')
           return
         }
 
-        // Step 2: Turn head LEFT (user turns physical left -> positive yaw)
-        if (currentStep.id === 'left' && yaw < YAW_THRESHOLD) {
+        // Step 2: Turn head LEFT (user turns physical left -> yaw >= +4°)
+        if (currentStep.id === 'left' && yaw < 4) {
           goodFramesRef.current = 0
           setStatus('analyzing')
           setHoldProgress(0)
-          setInstruction(`Turn your head to the LEFT ← (yaw: ${yaw.toFixed(0)}°)`)
+          setInstruction('Turn your head slightly to your LEFT ←')
           return
         }
 
-        // Step 3: Turn head RIGHT (user turns physical right -> negative yaw)
-        if (currentStep.id === 'right' && yaw > -YAW_THRESHOLD) {
+        // Step 3: Turn head RIGHT (user turns physical right -> yaw <= -4°)
+        if (currentStep.id === 'right' && yaw > -4) {
           goodFramesRef.current = 0
           setStatus('analyzing')
           setHoldProgress(0)
-          setInstruction(`Turn your head to the RIGHT → (yaw: ${yaw.toFixed(0)}°)`)
+          setInstruction('Turn your head slightly to your RIGHT →')
           return
         }
 

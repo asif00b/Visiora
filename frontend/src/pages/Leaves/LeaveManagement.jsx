@@ -825,6 +825,11 @@ export default function LeaveManagement() {
                           </div>
 
                           <div className="flex items-center gap-2">
+                            {l.reason?.includes('[Email Submission]') && (
+                              <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center gap-1 shadow-sm">
+                                📩 Email Request
+                              </span>
+                            )}
                             <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${typeColor}`}>
                               {l.leave_type} Leave
                             </span>

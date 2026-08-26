@@ -89,8 +89,8 @@ def _analyze_landmarks(face, img_h: int, img_w: int) -> dict:
                 smile_w = mouth_w / face_w
                 smile_h = mouth_h / face_h
                 
-                # Accept if mouth stretches wide (>33%) OR mouth opens to show teeth (>4%)
-                is_smiling = (smile_w > 0.33) or (smile_h > 0.04)
+                # Accept if mouth stretches wide (>30%) OR mouth opens slightly (>2%)
+                is_smiling = (smile_w > 0.30) or (smile_h > 0.02)
                 smile_score = max(smile_w, smile_h)
             
         except (IndexError, TypeError):
@@ -130,45 +130,28 @@ def _analyze_landmarks(face, img_h: int, img_w: int) -> dict:
     # the backend are UNMIRRORED. That means "face turns right in camera" =
     # positive yaw as seen by the backend, which is what the frontend test
     # `yaw > YAW_THRESHOLD` expects for the 'right' step.
+    # ── Head pose (yaw) — calculated from 5-point kps (calibrated detector keypoints) ──
     yaw_angle = 0.0
-    _lm = landmarks  # already resolved above (106-pt or 5-pt or None)
+    kps = getattr(face, 'kps', None)
+    if kps is None and landmarks is not None and len(landmarks) >= 5:
+        kps = landmarks
 
-    if _lm is not None and len(_lm) >= 106:
-        # 106-point layout:
-        #   pts 38,88 = approximate left-eye centre and right-eye centre
-        #   pt  86    = nose tip (bottom of nose bridge)
+    if kps is not None and len(kps) >= 3:
         try:
-            left_eye  = _lm[38]   # left eye inner corner
-            right_eye = _lm[89]   # right eye inner corner  (≈symmetrical)
-            nose_tip  = _lm[86]   # nose tip
+            left_eye  = kps[0]   # viewer's left eye (user's right eye)
+            right_eye = kps[1]   # viewer's right eye (user's left eye)
+            nose_tip  = kps[2]   # nose tip
 
             eye_mid_x = (float(left_eye[0]) + float(right_eye[0])) / 2.0
             nose_x    = float(nose_tip[0])
             eye_span  = abs(float(right_eye[0]) - float(left_eye[0]))
 
             if eye_span > 1e-3:
-                # Positive → nose is to the right of eye midpoint → face turned right
+                # Positive → nose is to the right of eye midpoint → turned LEFT (user's left)
+                # Negative → nose is to the left of eye midpoint → turned RIGHT (user's right)
                 ratio = (nose_x - eye_mid_x) / eye_span
                 import math
-                yaw_angle = math.degrees(math.atan(ratio * 3.0))
-        except (IndexError, TypeError):
-            pass
-
-    elif _lm is not None and len(_lm) >= 5:
-        # 5-point kps: [left_eye, right_eye, nose, left_mouth, right_mouth]
-        try:
-            import math
-            left_eye  = _lm[0]
-            right_eye = _lm[1]
-            nose_tip  = _lm[2]
-
-            eye_mid_x = (float(left_eye[0]) + float(right_eye[0])) / 2.0
-            nose_x    = float(nose_tip[0])
-            eye_span  = abs(float(right_eye[0]) - float(left_eye[0]))
-
-            if eye_span > 1e-3:
-                ratio = (nose_x - eye_mid_x) / eye_span
-                yaw_angle = math.degrees(math.atan(ratio * 3.0))
+                yaw_angle = math.degrees(math.atan(ratio * 3.2))
         except (IndexError, TypeError):
             pass
 
@@ -280,6 +263,7 @@ def analyze_frame():
     # Use the most confident face for guided analysis
     face = max(faces, key=lambda f: float(f.det_score))
     analysis = _analyze_landmarks(face, h, w)
+    logger.info(f"[AnalyzeFrameLog] yaw={analysis.get('yaw_angle')} centered={analysis.get('face_centered')} size={analysis.get('face_size_ok')} smile={analysis.get('is_smiling')}")
 
     # ── Build guided instruction ──────────────────────────────────────────────
     if not analysis['face_size_ok']:

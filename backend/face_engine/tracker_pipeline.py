@@ -45,12 +45,25 @@ def _create_tracker():
     raise RuntimeError("No OpenCV tracker is available. Install opencv-contrib-python-headless.")
 
 
+def _unpack_kps(kps):
+    """Unpack kps which may be a dict {'canonical_5':..., 'landmarks_106':...} or a plain array.
+    Returns (landmarks_array, canonical5_array)."""
+    if kps is None:
+        return None, None
+    if isinstance(kps, dict):
+        l106 = kps.get('landmarks_106')
+        c5 = kps.get('canonical_5')
+        return (l106 if l106 is not None else c5), c5
+    return kps, None
+
+
 class ScannerState:
     def __init__(self, scanner_id):
         self.scanner_id = scanner_id
         self.trackers = {}
         self.track_bboxes = {}
-        self.track_kpss = {}
+        self.track_kpss = {}    # landmarks_106 array (for rendering)
+        self.track_c5kpss = {}  # canonical_5 array (for recognition alignment)
         self.track_rel_kpss = {}
         self.track_ema_kpss = {}
         self.track_cache = {}
@@ -65,6 +78,7 @@ class ScannerState:
         self.trackers.pop(track_id, None)
         self.track_bboxes.pop(track_id, None)
         self.track_kpss.pop(track_id, None)
+        self.track_c5kpss.pop(track_id, None)
         self.track_rel_kpss.pop(track_id, None)
         self.track_ema_kpss.pop(track_id, None)
         self.track_cache.pop(track_id, None)
@@ -100,7 +114,29 @@ class TrackingPipeline:
         try:
             from face_engine.liveness import get_eye_aspect_ratio_from_image, evaluate_real_human_liveness
             top_b, right_b, bottom_b, left_b = ty, tx2, ty2, tx
-            ear = get_eye_aspect_ratio_from_image(frame_rgb, (top_b, right_b, bottom_b, left_b))
+            
+            # Compute EAR directly from InsightFace 106 2D landmarks if available
+            ear = None
+            if cur_kps is not None and len(cur_kps) >= 88:
+                try:
+                    p70, p62 = np.array(cur_kps[70][:2]), np.array(cur_kps[62][:2])
+                    p66, p74 = np.array(cur_kps[66][:2]), np.array(cur_kps[74][:2])
+                    left_h = float(np.linalg.norm(p70 - p62))
+                    left_w = float(np.linalg.norm(p74 - p66))
+                    left_ear = left_h / (left_w + 1e-6)
+
+                    p83, p75 = np.array(cur_kps[83][:2]), np.array(cur_kps[75][:2])
+                    p79, p87 = np.array(cur_kps[79][:2]), np.array(cur_kps[87][:2])
+                    right_h = float(np.linalg.norm(p83 - p75))
+                    right_w = float(np.linalg.norm(p87 - p79))
+                    right_ear = right_h / (right_w + 1e-6)
+
+                    ear = float((left_ear + right_ear) / 2.0)
+                except Exception:
+                    ear = None
+
+            if ear is None:
+                ear = get_eye_aspect_ratio_from_image(frame_rgb, (top_b, right_b, bottom_b, left_b))
             
             ear_history = state.track_ear_history.setdefault(track_id, [])
             if ear is not None:
@@ -203,18 +239,23 @@ class TrackingPipeline:
                 
                 det = detections[det_idx]
                 box = det["box"]
-                kps = det["kps"]
-                
+                raw_kps = det["kps"]
+                lm_arr, c5_arr = _unpack_kps(raw_kps)
+
                 state.track_bboxes[tid] = box
-                state.track_kpss[tid] = kps
-                if kps is not None:
-                    state.track_rel_kpss[tid] = [(p[0] - box[0], p[1] - box[1]) for p in kps]
-                
+                state.track_kpss[tid] = lm_arr
+                state.track_c5kpss[tid] = c5_arr
+                if lm_arr is not None:
+                    try:
+                        state.track_rel_kpss[tid] = [(float(p[0]) - box[0], float(p[1]) - box[1]) for p in lm_arr]
+                    except Exception:
+                        pass
+
                 cache = state.track_cache.setdefault(tid, {})
                 cache["lost_count"] = 0
-                
-                self._calculate_ear(state, tid, box, frame_rgb, cur_kps=kps)
-                current_faces[tid] = (box, kps)
+
+                self._calculate_ear(state, tid, box, frame_rgb, cur_kps=lm_arr)
+                current_faces[tid] = (box, lm_arr)
 
         # Stale tracks cleanup
         max_lost = int(os.environ.get("TRACKER_IOU_MAX_LOST_FRAMES", "2"))
@@ -244,23 +285,28 @@ class TrackingPipeline:
                 track_id = state.next_track_id
                 state.next_track_id += 1
                 box = det["box"]
-                kps = det["kps"]
-                
+                raw_kps = det["kps"]
+                lm_arr, c5_arr = _unpack_kps(raw_kps)
+
                 state.trackers[track_id] = "IOU_TRACKER"
                 state.track_bboxes[track_id] = box
-                state.track_kpss[track_id] = kps
-                if kps is not None:
-                    state.track_rel_kpss[track_id] = [(p[0] - box[0], p[1] - box[1]) for p in kps]
-                    
+                state.track_kpss[track_id] = lm_arr
+                state.track_c5kpss[track_id] = c5_arr
+                if lm_arr is not None:
+                    try:
+                        state.track_rel_kpss[track_id] = [(float(p[0]) - box[0], float(p[1]) - box[1]) for p in lm_arr]
+                    except Exception:
+                        pass
+
                 state.track_cache[track_id] = {
                     "age": 0,
                     "lost_count": 0,
                     "frames_since_rec": self.REC_REFRESH_INTERVAL,
                     "history": [],
                 }
-                
-                self._calculate_ear(state, track_id, box, frame_rgb, cur_kps=kps)
-                current_faces[track_id] = (box, kps)
+
+                self._calculate_ear(state, track_id, box, frame_rgb, cur_kps=lm_arr)
+                current_faces[track_id] = (box, lm_arr)
 
     def process_frame(self, scanner_id, frame_rgb, detector_func, recognizer_func):
         h, w = frame_rgb.shape[:2]
@@ -271,12 +317,12 @@ class TrackingPipeline:
         state.last_used = time.time()
         state.frame_idx += 1
 
-        # Fetch liveness configuration
+        # Fetch liveness configuration (Always ENABLED for live anti-spoofing)
         try:
             from models.unknown_face import SystemConfig
-            liveness_enabled = SystemConfig.get('liveness_enabled', 'false').lower() == 'true'
+            liveness_enabled = SystemConfig.get('liveness_enabled', 'true').lower() == 'true'
         except Exception:
-            liveness_enabled = False
+            liveness_enabled = True
 
         current_faces = {}
         
@@ -321,32 +367,14 @@ class TrackingPipeline:
 
             state.track_bboxes[track_id] = new_box
 
-            # --- EAR Liveness calculation ---
-            try:
-                from face_engine.liveness import get_eye_aspect_ratio_from_image
-                top_b, right_b, bottom_b, left_b = ty, tx2, ty2, tx
-                ear = get_eye_aspect_ratio_from_image(frame_rgb, (top_b, right_b, bottom_b, left_b))
-                if ear is not None:
-                    ear_history = state.track_ear_history.setdefault(track_id, [])
-                    ear_history.append(ear)
-                    if len(ear_history) > 15:
-                        ear_history.pop(0)
-                    
-                    if len(ear_history) >= 5:
-                        ear_var = float(np.var(ear_history))
-                        # Variance threshold: 0.00004
-                        # Static photo/screen has variance near zero (typically < 1e-6)
-                        if ear_var < 0.00004:
-                            state.track_liveness_confirmed[track_id] = False
-                        else:
-                            state.track_liveness_confirmed[track_id] = True
-            except Exception as exc:
-                logger.debug("[Tracker] EAR check failed: %s", exc)
-
             rel_pts = state.track_rel_kpss.get(track_id)
             if rel_pts is None:
                 prev = state.track_kpss.get(track_id)
-                rel_pts = [(p[0] - tx, p[1] - ty) for p in prev] if prev is not None else None
+                if prev is not None:
+                    try:
+                        rel_pts = [(float(p[0]) - tx, float(p[1]) - ty) for p in prev]
+                    except Exception:
+                        rel_pts = None
 
             if rel_pts is not None:
                 ema_pts = state.track_ema_kpss.get(track_id)
@@ -400,13 +428,18 @@ class TrackingPipeline:
 
             track_id = state.next_track_id
             state.next_track_id += 1
-            cur_kps = kpss[idx] if kpss is not None and idx < len(kpss) else None
+            raw_kps = kpss[idx] if kpss is not None and idx < len(kpss) else None
+            lm_arr, c5_arr = _unpack_kps(raw_kps)
 
             state.trackers[track_id] = tracker
             state.track_bboxes[track_id] = clean_det
-            state.track_kpss[track_id] = cur_kps
-            if cur_kps is not None:
-                state.track_rel_kpss[track_id] = [(p[0] - x1, p[1] - y1) for p in cur_kps]
+            state.track_kpss[track_id] = lm_arr
+            state.track_c5kpss[track_id] = c5_arr
+            if lm_arr is not None:
+                try:
+                    state.track_rel_kpss[track_id] = [(float(p[0]) - x1, float(p[1]) - y1) for p in lm_arr]
+                except Exception:
+                    pass
 
             state.track_cache[track_id] = {
                 "age": 0,
@@ -414,7 +447,7 @@ class TrackingPipeline:
                 "frames_since_rec": self.REC_REFRESH_INTERVAL,
                 "history": [],
             }
-            current_faces[track_id] = (clean_det, cur_kps)
+            current_faces[track_id] = (clean_det, lm_arr)
 
     def _recognize_stable_tracks(self, state, frame_rgb, recognizer_func):
         batch_crops = []
@@ -423,11 +456,11 @@ class TrackingPipeline:
             cache["age"] = cache.get("age", 0) + 1
             cache["frames_since_rec"] = cache.get("frames_since_rec", 0) + 1
 
-            # Exclude spoof / fake faces from recognition batch
-            liveness_confirmed = state.track_liveness_confirmed.get(tid, True)
+            # EXPLICIT STRICT GATE: Recognition MUST NEVER run until liveness is positively verified (default=False)
+            liveness_confirmed = state.track_liveness_confirmed.get(tid, False)
             is_spoof = cache.get("is_spoof", False) or not liveness_confirmed
 
-            if is_spoof:
+            if is_spoof or not liveness_confirmed:
                 cache["user_id"] = "Unknown"
                 cache["recognition_confirmed"] = False
                 cache["name"] = "Unknown"
@@ -439,7 +472,9 @@ class TrackingPipeline:
                 and tid in state.track_bboxes
                 and state.track_kpss.get(tid) is not None
             ):
-                batch_crops.append((state.track_bboxes[tid], state.track_kpss[tid]))
+                # Pass canonical_5 for recognition alignment (may be None if not dict-based)
+                c5 = state.track_c5kpss.get(tid)
+                batch_crops.append((state.track_bboxes[tid], c5 if c5 is not None else state.track_kpss[tid]))
                 batch_ids.append(tid)
                 cache["frames_since_rec"] = 0
 
@@ -508,13 +543,28 @@ class TrackingPipeline:
             if cache.get("_embedding") is not None:
                 res["_embedding"] = cache.get("_embedding")
 
-            if kps is not None and len(kps) == 5:
-                res["kpss"] = [{"x": float(p[0]) / w, "y": float(p[1]) / h} for p in kps]
-                le, re = kps[0], kps[1]
-                dx, dy = re[0] - le[0], re[1] - le[1]
-                raw_angle = np.degrees(np.arctan2(dy, abs(dx) if dx != 0 else 0.1))
-                angle = 0.7 * cache.get("angle", raw_angle) + 0.3 * raw_angle
-                cache["angle"] = angle
+            # kps is now a plain array (landmarks_106 or canonical_5)
+            # canonical_5 is stored separately in state.track_c5kpss
+            kps_arr = kps  # plain numpy array
+            c5_arr = state.track_c5kpss.get(tid) if hasattr(state, 'track_c5kpss') else None
+
+            if kps_arr is not None and len(kps_arr) > 0:
+                try:
+                    res["kpss"] = [{"x": float(p[0]) / w, "y": float(p[1]) / h} for p in kps_arr]
+                except Exception:
+                    pass
+                # Use canonical_5 for angle if available, else use first 2 points of kps_arr
+                angle_pts = c5_arr if (c5_arr is not None and len(c5_arr) >= 2) else (kps_arr[:2] if len(kps_arr) >= 2 else None)
+                if angle_pts is not None:
+                    try:
+                        le_x, le_y = float(angle_pts[0][0]), float(angle_pts[0][1])
+                        re_x, re_y = float(angle_pts[1][0]), float(angle_pts[1][1])
+                        dx, dy = re_x - le_x, re_y - le_y
+                        raw_angle = np.degrees(np.arctan2(dy, abs(dx) if dx != 0 else 0.1))
+                        angle = 0.7 * cache.get("angle", raw_angle) + 0.3 * raw_angle
+                        cache["angle"] = angle
+                    except Exception:
+                        pass
 
                 status = "FACE_STABLE"
                 if cache.get("age", 0) < self.STABLE_AGE_REQ:
@@ -542,7 +592,45 @@ class TrackingPipeline:
                     "history": cache.get("history", [])[-5:],
                 }
             results.append(res)
-        return results
+
+        # ── Deduplicate results to enforce Requirement 1 ──
+        # 1. IoU Spatial Deduplication (suppress duplicate overlapping face boxes)
+        filtered_results = []
+        for r in sorted(results, key=lambda item: item.get("distance", 1.0)):
+            box_a = (r["box"]["left"], r["box"]["top"], r["box"]["right"], r["box"]["bottom"])
+            dup = False
+            for existing in filtered_results:
+                box_b = (existing["box"]["left"], existing["box"]["top"], existing["box"]["right"], existing["box"]["bottom"])
+                xA = max(box_a[0], box_b[0])
+                yA = max(box_a[1], box_b[1])
+                xB = min(box_a[2], box_b[2])
+                yB = min(box_a[3], box_b[3])
+                interArea = max(0, xB - xA) * max(0, yB - yA)
+                boxAArea = (box_a[2] - box_a[0]) * (box_a[3] - box_a[1])
+                boxBArea = (box_b[2] - box_b[0]) * (box_b[3] - box_b[1])
+                iou = interArea / float(boxAArea + boxBArea - interArea + 1e-6)
+                if iou > 0.35:
+                    dup = True
+                    break
+            if not dup:
+                filtered_results.append(r)
+
+        # 2. Strict User ID Deduplication: Never allow the same user_id to appear twice in one frame
+        seen_uids = set()
+        final_results = []
+        for r in filtered_results:
+            uid = r.get("user_id")
+            if r.get("matched") and r.get("recognition_confirmed") and uid and uid != "Unknown":
+                if uid in seen_uids:
+                    r["matched"] = False
+                    r["recognition_confirmed"] = False
+                    r["user_id"] = "Unknown"
+                    r["name"] = "Unknown"
+                else:
+                    seen_uids.add(uid)
+            final_results.append(r)
+
+        return final_results
 
     def _cleanup_stale_scanners(self):
         now = time.time()

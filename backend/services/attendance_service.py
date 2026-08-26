@@ -77,9 +77,17 @@ def mark_attendance_once(
                 "message": f"Cooldown active. Minimum {min_left} min wait between punches.",
             }
 
-        existing = attendance_for_session(user_id, session_id, now=now)
+        # Query LATEST attendance record for user today (respecting any manual admin updates or previous scans)
+        q = Attendance.query.filter(
+            Attendance.user_id == user_id,
+            Attendance.attendance_date == day
+        )
+        if session_id is not None:
+            q = q.filter(Attendance.session_id == session_id)
 
-        # Enforce check-in deadline and core hour start at punch-in
+        latest_record = q.order_by(Attendance.timestamp.desc(), Attendance.id.desc()).first()
+
+        # Enforce check-in deadline and core hour start
         is_core_hours_satisfied = True
         if user:
             now_time = now.time()
@@ -90,42 +98,36 @@ def mark_attendance_once(
                 if now_time > user.must_be_in_start:
                     is_core_hours_satisfied = False
 
-        if existing:
-            # Check if this is a Punch OUT update
-            if existing.timestamp:
-                duration_secs = (now - existing.timestamp).total_seconds()
-                duration_hrs = round(duration_secs / 3600.0, 2)
-                hours_str = f"{int(duration_secs // 3600)}h {int((duration_secs % 3600) // 60)}m"
-                
-                existing.punch_out = now
-                existing.hours_worked = duration_hrs
-                existing.note = f"IN/OUT ({hours_str} logged)"
-                
-                # Check core hour end at punch-out
-                if user and user.must_be_in_end:
-                    if now.time() < user.must_be_in_end:
-                        existing.is_core_hours_satisfied = False
+        # STRICT ALTERNATING IN/OUT PUNCH LOGIC:
+        # Case A: User is currently IN (latest_record exists AND punch_out is NULL) -> Next Punch MUST BE OUT!
+        if latest_record and latest_record.punch_out is None:
+            duration_secs = (now - latest_record.timestamp).total_seconds()
+            duration_hrs = round(duration_secs / 3600.0, 2)
+            hours_str = f"{int(duration_secs // 3600)}h {int((duration_secs % 3600) // 60)}m"
 
-                try:
-                    db.session.commit()
-                except Exception:
-                    db.session.rollback()
+            latest_record.punch_out = now
+            latest_record.hours_worked = duration_hrs
+            latest_record.note = f"{latest_record.note or 'IN'} / OUT ({hours_str} logged)"
 
-                _last_marked_at[cooldown_key] = now_mono
-                return {
-                    "marked": True,
-                    "reason": "punch_out",
-                    "punch_type": "OUT",
-                    "hours_logged": duration_hrs,
-                    "attendance": existing,
-                }
+            if user and user.must_be_in_end:
+                if now.time() < user.must_be_in_end:
+                    latest_record.is_core_hours_satisfied = False
+
+            try:
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+
+            _last_marked_at[cooldown_key] = now_mono
             return {
-                "marked": False,
-                "reason": "already_marked_today",
-                "attendance": existing,
+                "marked": True,
+                "reason": "punch_out",
+                "punch_type": "OUT",
+                "hours_logged": duration_hrs,
+                "attendance": latest_record,
             }
 
-        # Punch IN (First scan of the day)
+        # Case B: User is currently OUT (latest_record is None OR punch_out is NOT NULL) -> Next Punch MUST BE IN!
         record = Attendance(
             user_id=user_id,
             session_id=session_id,
@@ -140,13 +142,21 @@ def mark_attendance_once(
             db.session.add(record)
             db.session.commit()
         except IntegrityError:
+            # Handle unique constraint on (user_id, attendance_date) if active in database
             db.session.rollback()
-            existing = attendance_for_session(user_id, session_id, now=now)
-            return {
-                "marked": False,
-                "reason": "already_marked_today",
-                "attendance": existing,
-            }
+            if latest_record:
+                latest_record.timestamp = now
+                latest_record.punch_out = None
+                latest_record.status = status
+                latest_record.note = note or "IN (Punch In 2nd Shift)"
+                try:
+                    db.session.commit()
+                    record = latest_record
+                except Exception:
+                    db.session.rollback()
+                    raise
+            else:
+                raise
         except Exception:
             db.session.rollback()
             raise
@@ -156,15 +166,18 @@ def mark_attendance_once(
         return {"marked": True, "reason": "marked", "punch_type": "IN", "attendance": record}
 
 
+DEFAULT_COOLDOWN_SECONDS = 3
+
+
 def _configured_cooldown(override):
     if override is not None:
         return int(override)
     try:
         from models.unknown_face import SystemConfig
 
-        return int(SystemConfig.get("attendance_cooldown_seconds", DEFAULT_COOLDOWN_SECONDS))
+        return int(SystemConfig.get("attendance_cooldown_seconds", 3))
     except Exception:
-        return DEFAULT_COOLDOWN_SECONDS
+        return 3
 
 
 def _reset_daily_cache_if_needed(day):

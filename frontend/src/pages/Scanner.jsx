@@ -3,7 +3,7 @@ import { useCamera } from '../hooks/useCamera'
 import { recognizeFace } from '../api/face'
 import { getAttendance } from '../api/attendance'
 import { verifyBiometricScan } from '../api/biometric'
-import { Camera, CameraOff, Zap, UserCheck, Activity, Maximize2, Minimize2, Fingerprint, RefreshCw } from 'lucide-react'
+import { Camera, CameraOff, Zap, UserCheck, Activity, Maximize2, Minimize2, Fingerprint, RefreshCw, Layers } from 'lucide-react'
 
 const estimateEmotion = (kpss) => {
   if (!kpss || kpss.length < 5) return 'Neutral'
@@ -38,11 +38,12 @@ export default function Scanner() {
   const inFlightRef = useRef(false)
   const scannerIdRef = useRef(`scanner-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   const markedRef = useRef(new Set())
-  const debugRef = useRef({ active: false, landmarks: true, measurements: true, fps: true })
+  const debugRef = useRef({ active: false, landmarks: false, measurements: false, mesh: false, fps: true })
   const lastScanTime = useRef(Date.now())
   const scanCount = useRef(0)
   const currentScanRate = useRef(0)
   const latestFacesRef = useRef([])
+  const smoothedKpssRef = useRef({})
 
   const [selectedCamera, setSelectedCamera] = useState('')
   const [scanning, setScanning] = useState(false)
@@ -77,8 +78,8 @@ export default function Scanner() {
     }
   }
 
-  const scannerIntervalMs = 120
-  const scannerFrameMaxWidth = 720
+  const scannerIntervalMs = 80
+  const scannerFrameMaxWidth = 480
 
   const THEME = {
     primary: '#00d4ff',
@@ -142,83 +143,89 @@ export default function Scanner() {
     const canvas = overlayRef.current
     if (!canvas || !video) return
 
-    const nextWidth = Math.max(1, video.clientWidth)
-    const nextHeight = Math.max(1, video.clientHeight)
-    if (canvas.width !== nextWidth || canvas.height !== nextHeight) {
-      canvas.width = nextWidth
-      canvas.height = nextHeight
+    const videoW = video.videoWidth || 640
+    const videoH = video.videoHeight || 480
+    const containerW = video.clientWidth || canvas.width
+    const containerH = video.clientHeight || canvas.height
+
+    if (canvas.width !== containerW || canvas.height !== containerH) {
+      canvas.width = containerW
+      canvas.height = containerH
     }
 
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-    // Backend face coordinates are in the CAPTURED frame resolution (downscaled),
-    // not the native camera resolution. Mirror the captureFrame downscale logic:
-    const nativeW = video.videoWidth || 640
-    const nativeH = video.videoHeight || 480
-    const captureScale = nativeW > scannerFrameMaxWidth ? scannerFrameMaxWidth / nativeW : 1
-    const capturedW = Math.round(nativeW * captureScale)
-    const capturedH = Math.round(nativeH * captureScale)
+    // Calculate exact Object-Cover scaling & cropping parameters
+    const videoAR = videoW / videoH
+    const containerAR = containerW / containerH
 
-    // Calculate exact object-cover crop offset & scale factors
-    const containerAR = canvas.width / canvas.height
-    const videoAR = capturedW / capturedH
-
-    let renderW = capturedW
-    let renderH = capturedH
-    let cropX = 0
-    let cropY = 0
+    let scale, offsetX = 0, offsetY = 0
 
     if (videoAR > containerAR) {
-      renderW = capturedH * containerAR
-      cropX = (capturedW - renderW) / 2
+      // Video is wider than container: cropped horizontally
+      scale = containerH / videoH
+      const displayedW = videoW * scale
+      offsetX = (displayedW - containerW) / 2
     } else {
-      renderH = capturedW / containerAR
-      cropY = (capturedH - renderH) / 2
+      // Video is taller than container: cropped vertically
+      scale = containerW / videoW
+      const displayedH = videoH * scale
+      offsetY = (displayedH - containerH) / 2
     }
 
-    const scaleX = canvas.width / renderW
-    const scaleY = canvas.height / renderH
+    // Unified Normalized (0..1) to Canvas Pixel Converter
+    const normToCanvas = (nx, ny) => {
+      const pixelX = nx * videoW
+      const pixelY = ny * videoH
+      let cx = pixelX * scale - offsetX
+      const cy = pixelY * scale - offsetY
+      if (mirrored) {
+        cx = containerW - cx
+      }
+      return { cx, cy }
+    }
+
     const activeDebug = debugRef.current
 
     currentScaleRef.current += (1.0 - currentScaleRef.current) * 0.15
     currentTxRef.current += (0.0 - currentTxRef.current) * 0.15
     currentTyRef.current += (0.0 - currentTyRef.current) * 0.15
 
-    if (zoomWrapperRef.current) {
-      zoomWrapperRef.current.style.transform = `translate3d(${currentTxRef.current}px, ${currentTyRef.current}px, 0) scale(${currentScaleRef.current})`
-    }
+    // Deduplicate faces: Keep at most ONE entry per user_id per frame
+    const seenUserIds = new Set()
+    const uniqueFaces = []
 
     faces.forEach((face) => {
-      const loc = face.location || (face.box ? [
-        face.box.top * capturedH,
-        face.box.right * capturedW,
-        face.box.bottom * capturedH,
-        face.box.left * capturedW
-      ] : null)
+      if (!face || !face.box) return
+      const uid = face.user_id
+      if (face.matched && uid && uid !== 'Unknown') {
+        if (seenUserIds.has(uid)) return
+        seenUserIds.add(uid)
+      }
+      uniqueFaces.push(face)
+    })
 
-      if (!loc) return
-      let [top, right, bottom, left] = loc
+    uniqueFaces.forEach((face) => {
+      if (!face.box) return
 
-      // Calculate base un-padded face box on canvas
-      const rawLeft = (left - cropX) * scaleX
-      const rawTop = (top - cropY) * scaleY
-      const rawW = (right - left) * scaleX
-      const rawH = (bottom - top) * scaleY
+      const topLeft = normToCanvas(face.box.left, face.box.top)
+      const bottomRight = normToCanvas(face.box.right, face.box.bottom)
 
-      // Tight, natural padding (5% uniform padding around face box)
+      const rawLeft = Math.min(topLeft.cx, bottomRight.cx)
+      const rawTop = topLeft.cy
+      const rawW = Math.abs(bottomRight.cx - topLeft.cx)
+      const rawH = bottomRight.cy - topLeft.cy
+
+      // Tight 5% uniform padding around face box
       const padW = rawW * 0.05
       const padH = rawH * 0.05
 
-      let x = rawLeft - padW
-      let y = rawTop - padH
-      let w = rawW + padW * 2
-      let h = rawH + padH * 2
-
-      if (mirrored) {
-        x = canvas.width - x - w
-      }
+      const x = rawLeft - padW
+      const y = rawTop - padH
+      const w = rawW + padW * 2
+      const h = rawH + padH * 2
 
       const isConfirmed = face.matched && face.recognition_confirmed
       const isCandidate = face.matched && !face.recognition_confirmed
@@ -263,50 +270,123 @@ export default function Scanner() {
       ctx.stroke()
       ctx.restore()
 
-      if (activeDebug.active && (activeDebug.landmarks || activeDebug.measurements) && face.landmarks) {
-        const kps = face.landmarks
-        const ptCoords = []
+      const showMesh = Boolean(activeDebug.active && (activeDebug.landmarks || activeDebug.measurements || activeDebug.mesh))
+      const kps = face.landmarks || face.kpss
+      if (showMesh && kps && kps.length > 0) {
+        const rawPtCoords = []
 
-        kps.forEach((pt, idx) => {
-          let px = (pt.x * capturedW - cropX) * scaleX
-          const py = (pt.y * capturedH - cropY) * scaleY
-          if (mirrored) px = canvas.width - px
-          ptCoords.push({ px, py })
+        kps.forEach((pt) => {
+          const ptNormX = typeof pt.x === 'number' ? pt.x : pt[0]
+          const ptNormY = typeof pt.y === 'number' ? pt.y : pt[1]
+          const { cx, cy } = normToCanvas(ptNormX, ptNormY)
 
-          // Render visual facial landmark dots directly on the face
-          ctx.beginPath()
-          ctx.arc(px, py, 3.5, 0, 2 * Math.PI)
-          if (idx <= 1) ctx.fillStyle = '#00d4ff'       // Eyes: Cyan
-          else if (idx === 2) ctx.fillStyle = '#f59e0b' // Nose: Amber
-          else ctx.fillStyle = '#10b981'                // Mouth: Emerald
-          ctx.fill()
-          ctx.strokeStyle = '#ffffff'
-          ctx.lineWidth = 1.2
-          ctx.stroke()
+          // Strict Spatial Outlier Filter: Discard landmarks floating outside face region
+          const marginX = w * 0.15
+          const marginY = h * 0.15
+          if (cx >= x - marginX && cx <= x + w + marginX && cy >= y - marginY && cy <= y + h + marginY) {
+            rawPtCoords.push({ px: cx, py: cy })
+          }
         })
 
-        // Draw subtle measurement connection lines between landmarks when Measurements debug ON
-        if (activeDebug.measurements && ptCoords.length >= 5) {
-          ctx.save()
-          ctx.strokeStyle = 'rgba(0, 212, 255, 0.45)'
-          ctx.lineWidth = 1.2
-          ctx.setLineDash([3, 3])
+        // Temporal EMA Smoothing (alpha = 0.40) per face track ID to remove landmark jitter
+        const faceKey = face.track_id !== undefined ? face.track_id : (face.user_id || '0')
+        const prevSmoothed = smoothedKpssRef.current[faceKey]
+        let ptCoords = []
 
-          // Eye-to-eye line
-          ctx.beginPath()
-          ctx.moveTo(ptCoords[0].px, ptCoords[0].py)
-          ctx.lineTo(ptCoords[1].px, ptCoords[1].py)
-          ctx.stroke()
-
-          // Nose-to-mouth lines
-          ctx.beginPath()
-          ctx.moveTo(ptCoords[2].px, ptCoords[2].py)
-          ctx.lineTo(ptCoords[3].px, ptCoords[3].py)
-          ctx.moveTo(ptCoords[2].px, ptCoords[2].py)
-          ctx.lineTo(ptCoords[4].px, ptCoords[4].py)
-          ctx.stroke()
-          ctx.restore()
+        if (prevSmoothed && prevSmoothed.length === rawPtCoords.length) {
+          const alpha = 0.40
+          ptCoords = rawPtCoords.map((target, idx) => {
+            const prev = prevSmoothed[idx]
+            return {
+              px: prev.px + (target.px - prev.px) * alpha,
+              py: prev.py + (target.py - prev.py) * alpha
+            }
+          })
+        } else {
+          ptCoords = rawPtCoords
         }
+        smoothedKpssRef.current[faceKey] = ptCoords
+
+        const is106Mesh = ptCoords.length >= 106
+
+        // Determine eye open / closed state for visual blink detection
+        let eyesClosed = false
+        if (is106Mesh) {
+          const leftEyeH = Math.hypot(ptCoords[70].px - ptCoords[62].px, ptCoords[70].py - ptCoords[62].py)
+          const leftEyeW = Math.hypot(ptCoords[74].px - ptCoords[66].px, ptCoords[74].py - ptCoords[66].py)
+          const leftEar = leftEyeW > 0 ? leftEyeH / leftEyeW : 0.3
+          eyesClosed = leftEar < 0.22
+        }
+
+        const eyeColor = eyesClosed ? '#f59e0b' : '#00d4ff'
+
+        // Generate dense interpolated 1/3 pixel micro-dots section-wise
+        const denseDots = []
+
+        const addSectionDots = (indices, color, isClosed = false) => {
+          if (!indices || indices.length === 0) return
+          for (let i = 0; i < indices.length - (isClosed ? 0 : 1); i++) {
+            const idxA = indices[i]
+            const idxB = indices[(i + 1) % indices.length]
+            if (idxA < ptCoords.length && idxB < ptCoords.length) {
+              const pA = ptCoords[idxA]
+              const pB = ptCoords[idxB]
+              denseDots.push({ px: pA.px, py: pA.py, color })
+              // 2 Interpolated sub-dots between landmark points
+              denseDots.push({ px: pA.px + 0.33 * (pB.px - pA.px), py: pA.py + 0.33 * (pB.py - pA.py), color })
+              denseDots.push({ px: pA.px + 0.66 * (pB.px - pA.px), py: pA.py + 0.66 * (pB.py - pA.py), color })
+            }
+          }
+          if (!isClosed && indices.length > 0) {
+            const lastIdx = indices[indices.length - 1]
+            if (lastIdx < ptCoords.length) {
+              const pLast = ptCoords[lastIdx]
+              denseDots.push({ px: pLast.px, py: pLast.py, color })
+            }
+          }
+        }
+
+        if (is106Mesh) {
+          // 1. Jawline / Face Edge (0..32) -> Sky Blue
+          addSectionDots(Array.from({ length: 33 }, (_, i) => i), '#38bdf8', false)
+
+          // 2. Left Eyebrow (33..37 upper, 38..42 lower) & Right Eyebrow (43..47, 48..52) -> Violet
+          addSectionDots([33, 34, 35, 36, 37], '#c084fc', false)
+          addSectionDots([38, 39, 40, 41, 42], '#c084fc', false)
+          addSectionDots([43, 44, 45, 46, 47], '#c084fc', false)
+          addSectionDots([48, 49, 50, 51, 52], '#c084fc', false)
+
+          // 3. Nose Bridge (53..56) & Nose Base (57..61) -> Gold / Amber
+          addSectionDots([53, 54, 55, 56], '#facc15', false)
+          addSectionDots([57, 58, 59, 60, 61], '#facc15', false)
+
+          // 4. Left Eye (62..74) & Right Eye (75..87) -> Bright Cyan / Gold
+          addSectionDots(Array.from({ length: 13 }, (_, i) => 62 + i), eyeColor, true)
+          addSectionDots(Array.from({ length: 13 }, (_, i) => 75 + i), eyeColor, true)
+
+          // 5. Upper Lip Outer (88..92) & Inner (96..99) -> Rose Red
+          addSectionDots([88, 89, 90, 91, 92], '#f43f5e', false)
+          addSectionDots([96, 97, 98, 99], '#f43f5e', false)
+
+          // 6. Lower Lip Outer (92..95, 88) & Inner (99..103, 96) -> Hot Pink
+          addSectionDots([92, 93, 94, 95, 88], '#ec4899', false)
+          addSectionDots([99, 100, 101, 102, 103, 96], '#ec4899', false)
+
+          // 7. Temple / Ears (104, 105) -> Emerald Green
+          addSectionDots([104, 105], '#10b981', false)
+        } else {
+          ptCoords.forEach(pt => denseDots.push({ px: pt.px, py: pt.py, color: '#00d4ff' }))
+        }
+
+        // Render 1/3 pixel ultra-fine micro-dots (radius = 0.65px)
+        ctx.save()
+        denseDots.forEach((pt) => {
+          ctx.beginPath()
+          ctx.arc(pt.px, pt.py, 0.65, 0, 2 * Math.PI)
+          ctx.fillStyle = pt.color
+          ctx.fill()
+        })
+        ctx.restore()
       }
 
       // ── Compact Name Badge Overlay (Sleek, Small Pill) ──
@@ -584,13 +664,13 @@ export default function Scanner() {
               if (isMounted && scanningRef.current) setBioMessage('')
             } else {
               setBioMessage('')
-              await new Promise(r => setTimeout(r, 1000))
+              await new Promise(r => setTimeout(r, 2500))
             }
           }
         } catch (err) {
           if (!isMounted || !scanningRef.current) break
           setBioMessage('')
-          await new Promise(r => setTimeout(r, 1500))
+          await new Promise(r => setTimeout(r, 3000))
         }
       }
     }
@@ -631,7 +711,6 @@ export default function Scanner() {
               <CameraOff size={20} /> Stop Scanner
             </button>
           )}
-
 
           {scanning && (
             <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
