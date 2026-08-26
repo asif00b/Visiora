@@ -263,20 +263,83 @@ export default function Scanner() {
       ctx.stroke()
       ctx.restore()
 
-      if (activeDebug.active && activeDebug.landmarks && face.landmarks) {
+      if (activeDebug.active && (activeDebug.landmarks || activeDebug.measurements) && face.landmarks) {
         const kps = face.landmarks
+        const ptCoords = []
+
         kps.forEach((pt, idx) => {
           let px = (pt.x * capturedW - cropX) * scaleX
           const py = (pt.y * capturedH - cropY) * scaleY
           if (mirrored) px = canvas.width - px
+          ptCoords.push({ px, py })
 
+          // Render visual landmark dots
           ctx.beginPath()
-          ctx.arc(px, py, 2.5, 0, 2 * Math.PI)
-          if (idx <= 1) ctx.fillStyle = THEME.landmarkEye
-          else if (idx === 2) ctx.fillStyle = THEME.landmarkNose
-          else ctx.fillStyle = THEME.landmarkMouth
+          ctx.arc(px, py, 3.5, 0, 2 * Math.PI)
+          if (idx <= 1) ctx.fillStyle = '#00d4ff'       // Eyes: Cyan
+          else if (idx === 2) ctx.fillStyle = '#f59e0b' // Nose: Amber
+          else ctx.fillStyle = '#10b981'                // Mouth: Emerald
           ctx.fill()
+          ctx.strokeStyle = '#ffffff'
+          ctx.lineWidth = 1
+          ctx.stroke()
         })
+
+        // Draw visual measurement connection lines between landmarks when Measurements debug ON
+        if (activeDebug.measurements && ptCoords.length >= 5) {
+          ctx.save()
+          ctx.strokeStyle = 'rgba(0, 212, 255, 0.4)'
+          ctx.lineWidth = 1.2
+          ctx.setLineDash([3, 3])
+
+          // Draw inter-eye distance line
+          ctx.beginPath()
+          ctx.moveTo(ptCoords[0].px, ptCoords[0].py)
+          ctx.lineTo(ptCoords[1].px, ptCoords[1].py)
+          ctx.stroke()
+
+          // Draw nose-to-mouth lines
+          ctx.beginPath()
+          ctx.moveTo(ptCoords[2].px, ptCoords[2].py)
+          ctx.lineTo(ptCoords[3].px, ptCoords[3].py)
+          ctx.moveTo(ptCoords[2].px, ptCoords[2].py)
+          ctx.lineTo(ptCoords[4].px, ptCoords[4].py)
+          ctx.stroke()
+          ctx.restore()
+        }
+      }
+
+      // Visual Measurements HUD Card above face box when Measurements debug button ON
+      if (activeDebug.active && activeDebug.measurements) {
+        const diag = face.diagnostics || {}
+        const relMotion = diag.relative_internal_motion ?? 0.0
+        const earVar = diag.ear_variance ?? 0.0
+        const obsFrames = diag.observation_frames ?? 0
+        const isRigid = relMotion < 0.0002
+
+        const hudW = Math.max(180, w)
+        const hudH = 34
+        let hudX = x + (w - hudW) / 2
+        let hudY = y - hudH - 6
+        hudX = Math.max(8, Math.min(canvas.width - hudW - 8, hudX))
+        hudY = Math.max(8, Math.min(canvas.height - hudH - 8, hudY))
+
+        ctx.save()
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.92)'
+        ctx.strokeStyle = isRigid ? '#ef4444' : '#06b6d4'
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.roundRect(hudX, hudY, hudW, hudH, 8)
+        ctx.fill()
+        ctx.stroke()
+
+        ctx.font = 'bold 9px monospace'
+        ctx.fillStyle = isRigid ? '#fca5a5' : '#67e8f9'
+        ctx.fillText(`REL-MOTION: ${relMotion.toFixed(4)} | ${isRigid ? 'R-FROZEN (SPOOF)' : 'DEFORMING (LIVE)'}`, hudX + 8, hudY + 14)
+
+        ctx.fillStyle = '#94a3b8'
+        ctx.fillText(`EAR-VAR: ${earVar.toFixed(6)} | OBS: ${obsFrames}/8`, hudX + 8, hudY + 26)
+        ctx.restore()
       }
 
       // ── Compact Name Badge Overlay (Sleek, Small Pill) ──
