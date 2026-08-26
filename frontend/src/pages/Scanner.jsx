@@ -161,40 +161,30 @@ export default function Scanner() {
     const capturedW = Math.round(nativeW * captureScale)
     const capturedH = Math.round(nativeH * captureScale)
 
-    const scaleX = canvas.width / capturedW
-    const scaleY = canvas.height / capturedH
+    // Calculate exact object-cover crop offset & scale factors
+    const containerAR = canvas.width / canvas.height
+    const videoAR = capturedW / capturedH
+
+    let renderW = capturedW
+    let renderH = capturedH
+    let cropX = 0
+    let cropY = 0
+
+    if (videoAR > containerAR) {
+      renderW = capturedH * containerAR
+      cropX = (capturedW - renderW) / 2
+    } else {
+      renderH = capturedW / containerAR
+      cropY = (capturedH - renderH) / 2
+    }
+
+    const scaleX = canvas.width / renderW
+    const scaleY = canvas.height / renderH
     const activeDebug = debugRef.current
 
-    if (faces.length > 0 && faces.some(f => f.matched)) {
-      const primaryFace = faces.find(f => f.matched)
-      if (primaryFace && (primaryFace.location || primaryFace.box)) {
-        const [top, right, bottom, left] = primaryFace.location || [
-          primaryFace.box.top * capturedH,
-          primaryFace.box.right * capturedW,
-          primaryFace.box.bottom * capturedH,
-          primaryFace.box.left * capturedW
-        ]
-        const fw = (right - left) * scaleX
-        const fh = (bottom - top) * scaleY
-        const videoW = canvas.width
-        const videoH = canvas.height
-
-        const targetScale = Math.min(1.2, Math.max(1.0, 0.35 / (fw / videoW)))
-        const faceCenterX = ((left + right) / 2) * scaleX
-        const faceCenterY = ((top + bottom) / 2) * scaleY
-
-        const targetTx = (videoW / 2 - faceCenterX) * (targetScale - 1.0)
-        const targetTy = (videoH / 2 - faceCenterY) * (targetScale - 1.0)
-
-        currentScaleRef.current += (targetScale - currentScaleRef.current) * 0.12
-        currentTxRef.current += (targetTx - currentTxRef.current) * 0.12
-        currentTyRef.current += (targetTy - currentTyRef.current) * 0.12
-      }
-    } else {
-      currentScaleRef.current += (1.0 - currentScaleRef.current) * 0.15
-      currentTxRef.current += (0.0 - currentTxRef.current) * 0.15
-      currentTyRef.current += (0.0 - currentTyRef.current) * 0.15
-    }
+    currentScaleRef.current += (1.0 - currentScaleRef.current) * 0.15
+    currentTxRef.current += (0.0 - currentTxRef.current) * 0.15
+    currentTyRef.current += (0.0 - currentTyRef.current) * 0.15
 
     if (zoomWrapperRef.current) {
       zoomWrapperRef.current.style.transform = `translate3d(${currentTxRef.current}px, ${currentTyRef.current}px, 0) scale(${currentScaleRef.current})`
@@ -211,21 +201,20 @@ export default function Scanner() {
       if (!loc) return
       let [top, right, bottom, left] = loc
 
-      // Expand reticle frame box (18% padding) so it surrounds face, forehead, hair & chin naturally
-      const rawW = right - left
-      const rawH = bottom - top
-      const padW = rawW * 0.18
-      const padH = rawH * 0.18
+      // Calculate base un-padded face box on canvas
+      const rawLeft = (left - cropX) * scaleX
+      const rawTop = (top - cropY) * scaleY
+      const rawW = (right - left) * scaleX
+      const rawH = (bottom - top) * scaleY
 
-      left = Math.max(0, left - padW)
-      right = Math.min(capturedW, right + padW)
-      top = Math.max(0, top - padH * 1.2)
-      bottom = Math.min(capturedH, bottom + padH * 0.8)
+      // Tight, natural padding (5% uniform padding around face box)
+      const padW = rawW * 0.05
+      const padH = rawH * 0.05
 
-      let x = left * scaleX
-      const y = top * scaleY
-      const w = (right - left) * scaleX
-      const h = (bottom - top) * scaleY
+      let x = rawLeft - padW
+      let y = rawTop - padH
+      let w = rawW + padW * 2
+      let h = rawH + padH * 2
 
       if (mirrored) {
         x = canvas.width - x - w
@@ -277,8 +266,8 @@ export default function Scanner() {
       if (activeDebug.active && activeDebug.landmarks && face.landmarks) {
         const kps = face.landmarks
         kps.forEach((pt, idx) => {
-          let px = pt.x * scaleX
-          const py = pt.y * scaleY
+          let px = (pt.x * capturedW - cropX) * scaleX
+          const py = (pt.y * capturedH - cropY) * scaleY
           if (mirrored) px = canvas.width - px
 
           ctx.beginPath()
@@ -674,12 +663,12 @@ export default function Scanner() {
           >
             <div
               ref={zoomWrapperRef}
-              className="absolute inset-0 origin-center"
+              className="absolute inset-0 origin-center w-full h-full"
               style={{ transform: 'translate3d(0, 0, 0) scale(1)' }}
             >
               <video
                 ref={videoRef}
-                className="w-full h-full object-contain bg-slate-950"
+                className="w-full h-full object-cover bg-black"
                 style={{
                   transform: mirrored ? 'scaleX(-1)' : 'none'
                 }}
@@ -687,8 +676,8 @@ export default function Scanner() {
                 playsInline
                 autoPlay
               />
+              <canvas ref={overlayRef} className="absolute inset-0 w-full h-full pointer-events-none" />
             </div>
-            <canvas ref={overlayRef} className="absolute inset-0 w-full h-full pointer-events-none" />
             <canvas ref={canvasRef} className="hidden" />
 
             {!isActive && (
