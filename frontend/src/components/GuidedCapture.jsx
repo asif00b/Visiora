@@ -215,8 +215,8 @@ export default function GuidedCapture({ onCapture, maxImages = 10 }) {
           return
         }
 
-        // Step 2: Turn head LEFT
-        if (currentStep.id === 'left' && yaw > -YAW_THRESHOLD) {
+        // Step 2: Turn head LEFT (user turns physical left -> positive yaw)
+        if (currentStep.id === 'left' && yaw < YAW_THRESHOLD) {
           goodFramesRef.current = 0
           setStatus('analyzing')
           setHoldProgress(0)
@@ -224,8 +224,8 @@ export default function GuidedCapture({ onCapture, maxImages = 10 }) {
           return
         }
 
-        // Step 3: Turn head RIGHT
-        if (currentStep.id === 'right' && yaw < YAW_THRESHOLD) {
+        // Step 3: Turn head RIGHT (user turns physical right -> negative yaw)
+        if (currentStep.id === 'right' && yaw > -YAW_THRESHOLD) {
           goodFramesRef.current = 0
           setStatus('analyzing')
           setHoldProgress(0)

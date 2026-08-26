@@ -597,14 +597,6 @@ export default function Scanner() {
             </button>
           )}
 
-          <button
-            onClick={() => setMirrored(!mirrored)}
-            className={`btn-secondary py-3 px-4 ${mirrored ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/50' : ''}`}
-            title="Toggle Mirror View (Flip Box)"
-          >
-            <Zap size={20} className={mirrored ? 'fill-current' : ''} />
-            <span className="hidden sm:inline ml-2">{mirrored ? 'Mirrored' : 'Direct'}</span>
-          </button>
 
           {scanning && (
             <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
