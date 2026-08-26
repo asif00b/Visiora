@@ -1,10 +1,14 @@
 """
-Liveness Detection
-------------------
-Detects blink events using Eye Aspect Ratio (EAR).
-Used to prevent photo/video spoofing.
+Liveness & Presentation Attack Detection (PAD) Module
+------------------------------------------------------
+Provides temporal Eye Aspect Ratio (EAR) and normalized facial landmark micro-motion tracking.
 
-Uses face_recognition's built-in 68-point landmark predictor.
+LIMITATION DOCUMENTATION:
+This implementation uses temporal landmark micro-motion and eye-aspect ratio tracking to reject 
+static paper photos and frozen phone-screen presentation attacks. It is NOT a production-grade 
+Presentation Attack Detection (PAD) system and must not claim to reliably detect high-frame-rate 
+video replay attacks or 3D masks. For production-grade PAD, an external deep learning model 
+(such as MiniFASNet or Silent-Face-Anti-Spoofing ONNX) would need to be added separately.
 """
 
 import logging
@@ -21,8 +25,8 @@ except ImportError:
     LIVENESS_AVAILABLE = False
     logger.warning('[Liveness] face_recognition not installed. Liveness detection disabled.')
 
-EAR_THRESHOLD  = 0.25   # Below this = eye closed
-CONSEC_FRAMES  = 2       # Frames eye must be closed to count as blink
+EAR_THRESHOLD = 0.23   # Below this = eye closed / blink event
+CONSEC_FRAMES = 2      # Consecutive frames to count as blink
 
 
 def _eye_aspect_ratio(eye_points) -> float:
@@ -32,7 +36,7 @@ def _eye_aspect_ratio(eye_points) -> float:
     a = np.linalg.norm(eye_points[1] - eye_points[5])
     b = np.linalg.norm(eye_points[2] - eye_points[4])
     c = np.linalg.norm(eye_points[0] - eye_points[3])
-    return (a + b) / (2.0 * c + 1e-6)
+    return float((a + b) / (2.0 * c + 1e-6))
 
 
 def get_eye_aspect_ratio_from_image(image_rgb: np.ndarray, face_location=None) -> float | None:
@@ -40,7 +44,7 @@ def get_eye_aspect_ratio_from_image(image_rgb: np.ndarray, face_location=None) -
     Calculate the Eye Aspect Ratio (EAR) for a face in an image.
     Uses face_locations to speed up shape prediction.
     """
-    if not LIVENESS_AVAILABLE:
+    if not LIVENESS_AVAILABLE or image_rgb is None or image_rgb.size == 0:
         return None
     try:
         locs = [face_location] if face_location is not None else None
@@ -82,10 +86,7 @@ class LivenessSession:
         return LIVENESS_AVAILABLE
 
     def process_frame(self, image_rgb: np.ndarray) -> dict:
-        """
-        Process a single RGB frame and update blink count.
-        Returns status dict.
-        """
+        """Process a single RGB frame and update blink count."""
         result = {
             'blink_count': self.blink_count,
             'required': self.required_blinks,
@@ -94,7 +95,6 @@ class LivenessSession:
         }
 
         if not LIVENESS_AVAILABLE:
-            # If liveness not available, auto-pass
             result['passed'] = True
             result['message'] = 'Liveness not available — auto-approved'
             return result
@@ -106,7 +106,6 @@ class LivenessSession:
                 result['message'] = 'No face detected'
                 return result
 
-            # Use first face
             landmarks = landmarks_list[0]
             left_eye  = np.array(landmarks.get('left_eye', []))
             right_eye = np.array(landmarks.get('right_eye', []))
@@ -126,9 +125,7 @@ class LivenessSession:
                 result['blink_count'] = self.blink_count
                 result['passed'] = self.passed
                 result['ear'] = round(ear, 3)
-                result['message'] = (
-                    f'Blinked {self.blink_count}/{self.required_blinks} times'
-                )
+                result['message'] = f'Blinked {self.blink_count}/{self.required_blinks} times'
             else:
                 result['message'] = 'Could not resolve eye landmarks'
         except Exception as e:
@@ -139,10 +136,6 @@ class LivenessSession:
 
 
 def check_liveness_frame(image_rgb: np.ndarray, session_data: dict, required_blinks: int = 2) -> dict:
-    """
-    Stateless wrapper — pass session_data dict across requests.
-    session_data is mutated in place and should be stored in Flask session or client.
-    """
     if not LIVENESS_AVAILABLE:
         return {'passed': True, 'blink_count': required_blinks, 'required': required_blinks,
                 'liveness_available': False, 'message': 'Auto-approved (liveness unavailable)'}
@@ -159,155 +152,115 @@ def check_liveness_frame(image_rgb: np.ndarray, session_data: dict, required_bli
     return result
 
 
-def evaluate_real_human_liveness(image_rgb: np.ndarray, face_box=None, ear_history=None) -> dict:
+def evaluate_real_human_liveness(
+    image_rgb: np.ndarray,
+    face_box=None,
+    ear_history=None,
+    kps_history=None,
+    observation_window: int = 8
+) -> dict:
     """
-    Evaluates whether a detected face image is a real, live human or a photo/screen spoof.
-    Performs multi-layer anti-spoofing checks:
-      1. Static EAR Eye Aspect Ratio Variance (Catches frozen eyes on static photos across 6+ frames)
-      2. Facial Skin Glass Reflection (Evaluates specular glare strictly on upper 75% face skin)
-      3. Phone Hardware Rectangular Frame Detection (Detects 4-sided convex phone display bezels)
-      4. CLAHE-Normalized Skin Color Spectrum (Normalizes lighting for accurate skin verification)
-    Returns:
-      {
-        'liveness_passed': bool,
-        'is_spoof': bool,
-        'liveness_score': float,
-        'reason': str
-      }
-    """
-    import cv2
-    import numpy as np
+    Evaluates temporal evidence for a tracked face box.
+    Uses normalized facial keypoint displacement and smoothed Eye Aspect Ratio (EAR).
 
+    LIMITATION: Rejects static paper photos and frozen phone display screens.
+    Does NOT claim 3D mask or high-fps video replay PAD.
+
+    Returns structured per-face diagnostics dictionary.
+    """
     if image_rgb is None or image_rgb.size == 0:
-        return {'liveness_passed': False, 'is_spoof': True, 'liveness_score': 0.0, 'reason': 'Invalid image'}
-
-    try:
-        h, w = image_rgb.shape[:2]
-        
-        # Parse face bounding box coordinates accurately
-        if face_box is not None and isinstance(face_box, (list, tuple)) and len(face_box) == 4:
-            b = [int(v) for v in face_box]
-            # Standard location format: [top, right, bottom, left]
-            top = max(0, min(h - 1, b[0]))
-            right = max(1, min(w, b[1]))
-            bottom = max(top + 1, min(h, b[2]))
-            left = max(0, min(right - 1, b[3]))
-        else:
-            top, right, bottom, left = 0, w, h, 0
-
-        fw = max(1, right - left)
-        fh = max(1, bottom - top)
-
-        if fw < 30 or fh < 30:
-            return {'liveness_passed': True, 'is_spoof': False, 'liveness_score': 0.85, 'reason': 'Small face'}
-
-        # Facial skin ROI: Upper 75% of face box (excludes white shirt collars / clothes at bottom)
-        skin_bottom = top + int(fh * 0.75)
-        face_skin_crop = image_rgb[top:skin_bottom, left:right]
-
-        # ── Test 1: Static EAR Variance (Across 6+ Scan Frames) ──
-        if ear_history and len(ear_history) >= 6:
-            ear_var = float(np.var(ear_history))
-            if ear_var < 0.000015:  # Static frozen eyes across 6+ frames
-                res = {
-                    'liveness_passed': False,
-                    'is_spoof': True,
-                    'liveness_score': 0.1,
-                    'reason': 'Spoof Attack Blocked: Static photo detected (frozen eyes)'
-                }
-                logger.info(f"[Liveness] SPOOF DETECTED: {res['reason']}")
-                return res
-
-        # ── Test 2: Phone Glass Specular Reflection on Upper Face Skin ──
-        # Check specular glare strictly on facial skin (excluding white shirts)
-        hsv_skin = cv2.cvtColor(face_skin_crop, cv2.COLOR_RGB2HSV)
-        v_skin = hsv_skin[:, :, 2]
-        specular_mask = (v_skin >= 253)
-        specular_pct = float(np.mean(specular_mask) * 100.0)
-
-        # Phone glass screen reflection produces flat clipped patches (std dev < 1.0) over > 10% of facial skin
-        if specular_pct > 10.0:
-            glare_pixels = v_skin[specular_mask]
-            if len(glare_pixels) > 0 and float(np.std(glare_pixels)) < 1.0:
-                res = {
-                    'liveness_passed': False,
-                    'is_spoof': True,
-                    'liveness_score': 0.15,
-                    'specular_pct': round(specular_pct, 1),
-                    'reason': 'Spoof Attack Blocked: Phone screen glass glare reflection'
-                }
-                logger.info(f"[Liveness] SPOOF DETECTED: {res['reason']}")
-                return res
-
-        # ── Test 3: Phone Hardware Rectangular Bezel Border ──
-        # Expanded crop (20% margin around face to check for phone body edges)
-        exp_top = max(0, top - int(fh * 0.20))
-        exp_left = max(0, left - int(fw * 0.20))
-        exp_bottom = min(h, bottom + int(fh * 0.20))
-        exp_right = min(w, right + int(fw * 0.20))
-        exp_crop = image_rgb[exp_top:exp_bottom, exp_left:exp_right]
-
-        if exp_crop.shape[0] > 60 and exp_crop.shape[1] > 60:
-            gray_exp = cv2.cvtColor(exp_crop, cv2.COLOR_RGB2GRAY)
-            blur_exp = cv2.GaussianBlur(gray_exp, (5, 5), 0)
-            _, thresh_exp = cv2.threshold(blur_exp, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            contours, _ = cv2.findContours(thresh_exp, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-
-            rect_phone_detected = False
-            exp_area = exp_crop.shape[0] * exp_crop.shape[1]
-            for cnt in contours:
-                area = cv2.contourArea(cnt)
-                if 0.25 * exp_area < area < 0.85 * exp_area:
-                    peri = cv2.arcLength(cnt, True)
-                    approx = cv2.approxPolyDP(cnt, 0.04 * peri, True)
-                    if len(approx) == 4 and cv2.isContourConvex(approx):
-                        x_r, y_r, w_r, h_r = cv2.boundingRect(approx)
-                        aspect_ratio = float(h_r) / w_r if w_r > 0 else 0
-                        if 1.3 <= aspect_ratio <= 2.5:
-                            rect_phone_detected = True
-                            break
-
-            if rect_phone_detected:
-                res = {
-                    'liveness_passed': False,
-                    'is_spoof': True,
-                    'liveness_score': 0.1,
-                    'reason': 'Spoof Attack Blocked: Phone rectangular hardware frame detected'
-                }
-                logger.info(f"[Liveness] SPOOF DETECTED: {res['reason']}")
-                return res
-
-        # ── Test 4: CLAHE-Normalized Skin Tone Spectrum ──
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        v_norm = clahe.apply(v_skin)
-        h_ch, s_ch = hsv_skin[:, :, 0], hsv_skin[:, :, 1]
-
-        # Warm skin hue: 0 <= Hue <= 30 or 150 <= Hue <= 180, Saturation >= 10
-        skin_mask = ((h_ch <= 30) | (h_ch >= 150)) & (s_ch >= 10) & (s_ch <= 245) & (v_norm >= 20)
-        skin_pct = float(np.mean(skin_mask) * 100.0)
-
-        if skin_pct < 3.0:
-            res = {
-                'liveness_passed': False,
-                'is_spoof': True,
-                'liveness_score': round(skin_pct / 100.0, 2),
-                'skin_pct': round(skin_pct, 1),
-                'reason': 'Spoof Attack Blocked: Unnatural color spectrum (LED backlight screen)'
-            }
-            logger.info(f"[Liveness] SPOOF DETECTED: {res['reason']}")
-            return res
-
-        # Real Human Verified!
-        res = {
-            'liveness_passed': True,
-            'is_spoof': False,
-            'liveness_score': 0.95,
-            'skin_pct': round(skin_pct, 1),
-            'reason': 'Real human liveness verified'
+        return {
+            'liveness_passed': False,
+            'is_spoof': True,
+            'liveness_score': 0.0,
+            'decision': 'SPOOF',
+            'reason': 'Invalid image',
+            'diagnostics': {}
         }
-        logger.debug(f"[Liveness] PASSED: real human verified (skin={round(skin_pct, 1)}%)")
-        return res
 
-    except Exception as e:
-        logger.error(f"[AntiSpoof] Multi-spectrum liveness error: {e}")
-        return {'liveness_passed': True, 'is_spoof': False, 'liveness_score': 0.85, 'reason': 'Liveness fallback'}
+    h, w = image_rgb.shape[:2]
+
+    # Parse face bounding box
+    if face_box is not None and isinstance(face_box, (list, tuple)) and len(face_box) == 4:
+        b = [int(v) for v in face_box]
+        top, right, bottom, left = max(0, b[0]), min(w, b[1]), min(h, b[2]), max(0, b[3])
+    else:
+        top, right, bottom, left = 0, w, h, 0
+
+    fw = max(1, right - left)
+    fh = max(1, bottom - top)
+
+    ear_list = list(ear_history) if ear_history else []
+    kps_list = list(kps_history) if kps_history else []
+    obs_count = len(ear_list)
+
+    # Calculate normalized keypoint displacement across consecutive frames
+    motion_deltas = []
+    if len(kps_list) >= 2:
+        for i in range(1, len(kps_list)):
+            prev_kps = kps_list[i-1]
+            cur_kps = kps_list[i]
+            if prev_kps and cur_kps and len(prev_kps) == len(cur_kps):
+                # Normalized distance per keypoint
+                disp_sum = 0.0
+                for (px, py), (cx, cy) in zip(prev_kps, cur_kps):
+                    dx = float(cx - px) / float(fw)
+                    dy = float(cy - py) / float(fh)
+                    disp_sum += (dx * dx + dy * dy) ** 0.5
+                avg_disp = disp_sum / len(cur_kps)
+                motion_deltas.append(avg_disp)
+
+    mean_motion = float(np.mean(motion_deltas)) if motion_deltas else 0.0
+    ear_var = float(np.var(ear_list)) if len(ear_list) >= 4 else 0.0001
+    smoothed_ear = float(np.mean(ear_list[-3:])) if ear_list else 0.28
+    has_blink = any(e < EAR_THRESHOLD for e in ear_list) if ear_list else False
+
+    # Build per-face structured diagnostics
+    diagnostics = {
+        'face_box': [top, right, bottom, left],
+        'crop_dimensions': [fh, fw],
+        'liveness_engine': 'InsightFace_Landmark_Temporal_v6.2',
+        'observation_frames': obs_count,
+        'observation_window_required': observation_window,
+        'ear_current': round(smoothed_ear, 4),
+        'ear_variance': round(ear_var, 6),
+        'normalized_motion_delta': round(mean_motion, 6),
+        'blink_detected': has_blink
+    }
+
+    # Decision Logic across observation window
+    if obs_count < observation_window and not has_blink and mean_motion < 0.004:
+        # Pending observation window completion
+        return {
+            'liveness_passed': False,
+            'is_spoof': False,
+            'liveness_score': 0.5,
+            'decision': 'LIVENESS_CHECK',
+            'reason': f'Collecting temporal observation ({obs_count}/{observation_window} frames)...',
+            'diagnostics': diagnostics
+        }
+
+    # Frozen static check (static photo or frozen phone screen)
+    if obs_count >= observation_window and ear_var < 0.000008 and mean_motion < 0.0012 and not has_blink:
+        diagnostics['live_confidence'] = 0.05
+        diagnostics['spoof_confidence'] = 0.95
+        return {
+            'liveness_passed': False,
+            'is_spoof': True,
+            'liveness_score': 0.05,
+            'decision': 'SPOOF',
+            'reason': 'Spoof Rejected: Frozen temporal evidence (static photo / phone screen image)',
+            'diagnostics': diagnostics
+        }
+
+    # Real Human Verified!
+    diagnostics['live_confidence'] = 0.95
+    diagnostics['spoof_confidence'] = 0.05
+    return {
+        'liveness_passed': True,
+        'is_spoof': False,
+        'liveness_score': 0.95,
+        'decision': 'LIVE',
+        'reason': 'Real human verified: Temporal micro-motion & landmark dynamics confirmed',
+        'diagnostics': diagnostics
+    }

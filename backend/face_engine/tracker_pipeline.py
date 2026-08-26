@@ -58,6 +58,7 @@ class ScannerState:
         self.frame_idx = 0
         self.last_used = time.time()
         self.track_ear_history = {}
+        self.track_kps_history = {}
         self.track_liveness_confirmed = {}
 
     def cleanup_tracker(self, track_id):
@@ -68,6 +69,7 @@ class ScannerState:
         self.track_ema_kpss.pop(track_id, None)
         self.track_cache.pop(track_id, None)
         self.track_ear_history.pop(track_id, None)
+        self.track_kps_history.pop(track_id, None)
         self.track_liveness_confirmed.pop(track_id, None)
 
 
@@ -93,7 +95,7 @@ class TrackingPipeline:
         self.last_cleanup = time.time()
         self.tracker_backend = "unknown"
 
-    def _calculate_ear(self, state, track_id, box, frame_rgb):
+    def _calculate_ear(self, state, track_id, box, frame_rgb, cur_kps=None):
         tx, ty, tx2, ty2 = box
         try:
             from face_engine.liveness import get_eye_aspect_ratio_from_image, evaluate_real_human_liveness
@@ -106,23 +108,53 @@ class TrackingPipeline:
                 if len(ear_history) > 15:
                     ear_history.pop(0)
 
-            # Multi-spectrum anti-spoofing check for this track
-            liveness_res = evaluate_real_human_liveness(frame_rgb, (top_b, right_b, bottom_b, left_b), ear_history=ear_history)
+            kps_history = getattr(state, 'track_kps_history', {}).setdefault(track_id, [])
+            if cur_kps is not None:
+                kps_history.append(cur_kps)
+                if len(kps_history) > 15:
+                    kps_history.pop(0)
+
+            # Evaluate temporal landmark & EAR liveness
+            liveness_res = evaluate_real_human_liveness(
+                frame_rgb,
+                (top_b, right_b, bottom_b, left_b),
+                ear_history=ear_history,
+                kps_history=kps_history,
+                observation_window=8
+            )
 
             cache = state.track_cache.setdefault(track_id, {})
-            if liveness_res.get('is_spoof') or not liveness_res.get('liveness_passed'):
+            diag = liveness_res.get('diagnostics', {})
+            logger.info(
+                f"[LivenessDiagnostics] track_id={track_id} | decision={liveness_res.get('decision')} | "
+                f"live_conf={diag.get('live_confidence', 0)} | spoof_conf={diag.get('spoof_confidence', 0)} | "
+                f"obs={diag.get('observation_frames')}/8 | motion={diag.get('normalized_motion_delta')} | "
+                f"ear_var={diag.get('ear_variance')} | reason='{liveness_res.get('reason')}'"
+            )
+
+            is_spoof = liveness_res.get('is_spoof', False)
+            liveness_passed = liveness_res.get('liveness_passed', False)
+
+            if is_spoof:
                 state.track_liveness_confirmed[track_id] = False
                 cache['is_spoof'] = True
-                cache['liveness_reason'] = liveness_res.get('reason', 'Spoof Detected')
+                cache['liveness_reason'] = liveness_res.get('reason', 'Spoof Attack Rejected')
                 cache['user_id'] = "Unknown"
                 cache['recognition_confirmed'] = False
-            else:
+            elif liveness_passed:
                 state.track_liveness_confirmed[track_id] = True
                 cache['is_spoof'] = False
                 cache['liveness_reason'] = 'Real human verified'
+            else:
+                # Pending observation window completion (LIVENESS_CHECK)
+                state.track_liveness_confirmed[track_id] = False
+                cache['is_spoof'] = False
+                cache['liveness_reason'] = liveness_res.get('reason', 'LIVENESS_CHECK')
+                cache['user_id'] = "Unknown"
+                cache['recognition_confirmed'] = False
 
         except Exception as exc:
-            logger.debug("[Tracker] Liveness check failed: %s", exc)
+            logger.debug("[Tracker] Liveness check error: %s", exc)
 
     def _process_iou_tracking(self, state, frame_rgb, detector_func, current_faces, liveness_enabled=False):
         try:
@@ -181,7 +213,7 @@ class TrackingPipeline:
                 cache = state.track_cache.setdefault(tid, {})
                 cache["lost_count"] = 0
                 
-                self._calculate_ear(state, tid, box, frame_rgb)
+                self._calculate_ear(state, tid, box, frame_rgb, cur_kps=kps)
                 current_faces[tid] = (box, kps)
 
         # Stale tracks cleanup
@@ -227,7 +259,7 @@ class TrackingPipeline:
                     "history": [],
                 }
                 
-                self._calculate_ear(state, track_id, box, frame_rgb)
+                self._calculate_ear(state, track_id, box, frame_rgb, cur_kps=kps)
                 current_faces[track_id] = (box, kps)
 
     def process_frame(self, scanner_id, frame_rgb, detector_func, recognizer_func):
