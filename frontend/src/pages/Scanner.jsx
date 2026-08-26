@@ -290,61 +290,77 @@ export default function Scanner() {
         })
       }
 
-      const cardW = Math.max(w * 1.15, 230)
-      const cardH = 85
-      let cardX = x + (w - cardW) / 2
-      let cardY = y + h + 12
+      // ── Compact Name Badge Overlay (Sleek, Small Pill) ──
+      const nameText = face.name || 'Unknown'
+      const isSpoof = face.is_spoof || face.liveness_passed === false
+      const isPendingLiveness = face.liveness_reason?.includes('Collecting')
 
-      if (cardX < 10) cardX = 10
-      if (cardX + cardW > canvas.width - 10) cardX = canvas.width - cardW - 10
-      if (cardY + cardH > canvas.height - 10) cardY = y - cardH - 12
+      let badgeLabel = ''
+      let badgeColor = THEME.danger
+      let statusDot = '🔴'
+
+      if (isSpoof) {
+        badgeLabel = 'SPOOF DETECTED'
+        badgeColor = '#ef4444'
+        statusDot = '⚠️'
+      } else if (isPendingLiveness) {
+        badgeLabel = 'CHECKING LIVENESS...'
+        badgeColor = '#f59e0b'
+        statusDot = '⏳'
+      } else if (face.matched) {
+        badgeLabel = face.attendance_status === 'already_marked_today' ? 'ALREADY PUNCHED' : 'VERIFIED'
+        badgeColor = '#10b981'
+        statusDot = '🟢'
+      } else {
+        badgeLabel = 'UNKNOWN'
+        badgeColor = '#ef4444'
+        statusDot = '⚪'
+      }
 
       ctx.save()
-      ctx.fillStyle = THEME.cardBg
-      ctx.strokeStyle = THEME.cardBorder
-      ctx.lineWidth = 1
+      ctx.font = 'bold 13px system-ui, -apple-system, sans-serif'
+      const nameMetrics = ctx.measureText(nameText)
+      ctx.font = 'bold 9px system-ui, -apple-system, sans-serif'
+      const statusMetrics = ctx.measureText(badgeLabel)
+
+      const badgeH = 28
+      const badgeW = Math.max(120, nameMetrics.width + statusMetrics.width + 36)
+      
+      let badgeX = x + (w - badgeW) / 2
+      let badgeY = y + h + 8
+
+      // If badge overflows bottom of canvas, position it above the face box
+      if (badgeY + badgeH > canvas.height - 8) {
+        badgeY = y - badgeH - 8
+      }
+      // Strict clamping inside canvas boundaries so it is NEVER cut off top or bottom
+      badgeX = Math.max(8, Math.min(canvas.width - badgeW - 8, badgeX))
+      badgeY = Math.max(8, Math.min(canvas.height - badgeH - 8, badgeY))
+
+      // Draw Glassmorphic Dark Pill Background
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.88)'
+      ctx.strokeStyle = badgeColor
+      ctx.lineWidth = 1.5
+      ctx.shadowColor = badgeColor
+      ctx.shadowBlur = 8
 
       ctx.beginPath()
-      ctx.roundRect(cardX, cardY, cardW, cardH, 12)
+      ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 14)
       ctx.fill()
       ctx.stroke()
 
-      ctx.font = 'bold 15px system-ui, -apple-system, sans-serif'
-      ctx.fillStyle = THEME.text
-      ctx.fillText(face.name, cardX + 14, cardY + 24)
+      // Reset shadow for text rendering
+      ctx.shadowBlur = 0
 
-      ctx.font = '11px system-ui, -apple-system, sans-serif'
-      const isSpoof = face.is_spoof || face.liveness_passed === false
-      const statusText = isSpoof
-        ? '⚠️ SPOOF ATTACK / PHOTO DETECTED'
-        : face.matched
-        ? (face.attendance_status === 'already_marked_today' ? 'ALREADY PUNCHED' : 'VERIFIED')
-        : 'UNMATCHED'
-      const statusColor = isSpoof ? THEME.danger : face.matched ? THEME.accent : THEME.danger
+      // Render Name (Bold White)
+      ctx.font = 'bold 12px system-ui, -apple-system, sans-serif'
+      ctx.fillStyle = '#ffffff'
+      ctx.fillText(nameText, badgeX + 12, badgeY + 18)
 
-      ctx.fillStyle = statusColor
-      ctx.fillText(statusText, cardX + 14, cardY + 40)
-
-      if (activeDebug.active && activeDebug.measurements) {
-        ctx.fillStyle = THEME.textDim
-        ctx.fillText(`Dist: ${face.distance} | Exp: ${emotion}`, cardX + 14, cardY + 56)
-
-        const barY = cardY + 66
-        const barW = cardW - 28
-        ctx.fillStyle = 'rgba(255,255,255,0.1)'
-        ctx.fillRect(cardX + 14, barY, barW, 4)
-
-        ctx.fillStyle = color
-        ctx.fillRect(cardX + 14, barY, barW * (face.confidence / 100), 4)
-      } else {
-        const barY = cardY + 54
-        const barW = cardW - 28
-        ctx.fillStyle = 'rgba(255,255,255,0.1)'
-        ctx.fillRect(cardX + 14, barY, barW, 4)
-
-        ctx.fillStyle = color
-        ctx.fillRect(cardX + 14, barY, barW * (face.confidence / 100), 4)
-      }
+      // Render Status Badge Pill (Right Side of Pill)
+      ctx.font = 'bold 9px system-ui, -apple-system, sans-serif'
+      ctx.fillStyle = badgeColor
+      ctx.fillText(`${statusDot} ${badgeLabel}`, badgeX + 16 + nameMetrics.width, badgeY + 18)
 
       ctx.restore()
     })
